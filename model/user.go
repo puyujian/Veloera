@@ -992,17 +992,7 @@ func applyAndSaveCheckIn(tx *gorm.DB, user *User, reward int) error {
 	}
 
 	// Record this activity in log
-	logErr := tx.Create(&Log{
-		UserId:    user.Id,
-		Username:  user.Username,
-		Type:      LogTypeCheckIn, // 修改日志类型为签到
-		Content:   fmt.Sprintf("签到奖励 %s", common.LogQuota(reward)),
-		CreatedAt: common.GetTimestamp(),
-	}).Error
-
-	if logErr != nil {
-		common.SysError("failed to record check-in log: " + logErr.Error())
-	}
+RecordLog(user.Id, LogTypeCheckIn, fmt.Sprintf("签到奖励 %s", common.LogQuota(reward)))
 
 	return nil
 }
