@@ -73,7 +73,7 @@ const ModelSetting = () => {
           item.value = JSON.stringify(JSON.parse(item.value), null, 2);
         }
         if (item.key.endsWith('Enabled') || item.key.endsWith('enabled')) {
-          newInputs[item.key] = item.value === 'true' ? true : false;
+          newInputs[item.key] = item.value === 'true';
         } else {
           newInputs[item.key] = item.value;
         }
