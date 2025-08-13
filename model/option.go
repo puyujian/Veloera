@@ -101,6 +101,9 @@ func InitOptionMap() {
 	common.OptionMap["Chats"] = setting.Chats2JsonString()
 	common.OptionMap["GitHubClientId"] = ""
 	common.OptionMap["GitHubClientSecret"] = ""
+	common.OptionMap["LinuxDOClientId"] = ""
+	common.OptionMap["LinuxDOClientSecret"] = ""
+	common.OptionMap["LinuxDOMinimumTrustLevel"] = strconv.Itoa(common.LinuxDOMinimumTrustLevel)
 	common.OptionMap["TelegramBotToken"] = ""
 	common.OptionMap["TelegramBotName"] = ""
 	common.OptionMap["WeChatServerAddress"] = ""

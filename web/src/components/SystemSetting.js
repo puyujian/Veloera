@@ -516,7 +516,7 @@ const SystemSetting = () => {
     if (originInputs['LinuxDOMinimumTrustLevel'] !== inputs.LinuxDOMinimumTrustLevel) {
       options.push({
         key: 'LinuxDOMinimumTrustLevel',
-        value: inputs.LinuxDOMinimumTrustLevel,
+        value: inputs.LinuxDOMinimumTrustLevel.toString(),
       });
     }
 
