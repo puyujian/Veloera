@@ -395,9 +395,9 @@ const PersonalSetting = () => {
     setLoading(false);
   };
 
-  const getUsername = () => {
+  const getDisplayName = () => {
     if (userState.user) {
-      return userState.user.username;
+      return userState.user.display_name || userState.user.username;
     } else {
       return 'null';
     }
@@ -499,14 +499,14 @@ const PersonalSetting = () => {
                   avatar={
                     <Avatar
                       size='default'
-                      color={stringToColor(getUsername())}
+                      color={stringToColor(getDisplayName())}
                       style={{ marginRight: 4 }}
                     >
-                      {typeof getUsername() === 'string' &&
-                        getUsername().slice(0, 1)}
+                      {typeof getDisplayName() === 'string' &&
+                        getDisplayName().slice(0, 1)}
                     </Avatar>
                   }
-                  title={<Typography.Text>{getUsername()}</Typography.Text>}
+                  title={<Typography.Text>{getDisplayName()}</Typography.Text>}
                   description={
                     isRoot() ? (
                       <Tag color='red'>{t('管理员')}</Tag>
