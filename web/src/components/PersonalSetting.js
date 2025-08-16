@@ -260,9 +260,17 @@ const PersonalSetting = () => {
   const handleCheckIn = async () => {
     if (!checkInEnabled || !canCheckIn) return;
     
+    if (turnstileEnabled && turnstileToken === '') {
+      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      return;
+    }
+    
     try {
       setCheckInLoading(true);
-      const res = await API.post('/api/user/check_in');
+      const url = turnstileEnabled 
+        ? `/api/user/check_in?turnstile=${turnstileToken}`
+        : '/api/user/check_in';
+      const res = await API.post(url);
       const { success, message, data } = res.data;
       
       if (success) {
@@ -639,6 +647,19 @@ const PersonalSetting = () => {
                       </Typography.Text>
                     )}
                   </div>
+                  {turnstileEnabled && canCheckIn && (
+                    <div style={{ marginTop: 15 }}>
+                      <Turnstile
+                        sitekey={turnstileSiteKey}
+                        onVerify={(token) => {
+                          setTurnstileToken(token);
+                        }}
+                        onExpire={() => {
+                          setTurnstileToken('');
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </Card>
             )}
