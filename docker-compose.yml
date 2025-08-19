@@ -2,12 +2,12 @@ version: '3.4'
 
 services:
   veloera:
-    image: ghcr.io/veloera/veloera:latest
+    image: veloera-custom:latest
     container_name: veloera
     restart: always
     command: --log-dir /app/logs
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - ./data:/data
       - ./logs:/app/logs
@@ -32,18 +32,18 @@ services:
 
   redis:
     image: redis:latest
-    container_name: redis
+    container_name: redis-1
     restart: always
 
   mysql:
     image: mysql:8.2
-    container_name: mysql
+    container_name: mysql-1
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: 123456  # Ensure this matches the password in SQL_DSN
       MYSQL_DATABASE: veloera
     volumes:
-      - mysql_data:/var/lib/mysql
+      - /www/wwwroot/veloera/_data:/var/lib/mysql
     # ports:
     #   - "3306:3306"  # If you want to access MySQL from outside Docker, uncomment
 
