@@ -131,7 +131,8 @@ func GetChannelsByTag(tag string, idSort bool) ([]*Channel, error) {
 	return channels, err
 }
 
-func SearchChannels(keyword string, group string, model string, idSort bool) ([]*Channel, error) {
+// SearchChannels 新增支持根据类型/状态/标签进行过滤（保持向后兼容）
+func SearchChannels(keyword string, group string, model string, idSort bool, types []int, statuses []int, tags []string) ([]*Channel, error) {
 	var channels []*Channel
 	modelsCol := "`models`"
 
@@ -167,8 +168,20 @@ func SearchChannels(keyword string, group string, model string, idSort bool) ([]
 		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+model+"%")
 	}
 
+	// 追加类型/状态/标签过滤
+	query := baseQuery.Where(whereClause, args...)
+	if len(types) > 0 {
+		query = query.Where("type IN ?", types)
+	}
+	if len(statuses) > 0 {
+		query = query.Where("status IN ?", statuses)
+	}
+	if len(tags) > 0 {
+		query = query.Where("tag IN ?", tags)
+	}
+
 	// 执行查询
-	err := baseQuery.Where(whereClause, args...).Order(order).Find(&channels).Error
+	err := query.Order(order).Find(&channels).Error
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +472,8 @@ func GetPaginatedTags(offset int, limit int) ([]*string, error) {
 	return tags, err
 }
 
-func SearchTags(keyword string, group string, model string, idSort bool) ([]*string, error) {
+// SearchTags 新增支持类型/状态/标签过滤（当 tag_mode=true 聚合时用于先筛选标签集合）
+func SearchTags(keyword string, group string, model string, idSort bool, types []int, statuses []int, tagsFilter []string) ([]*string, error) {
 	var tags []*string
 	modelsCol := "`models`"
 
@@ -494,8 +508,18 @@ func SearchTags(keyword string, group string, model string, idSort bool) ([]*str
 		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+model+"%")
 	}
 
-	subQuery := baseQuery.Where(whereClause, args...).
-		Select("tag").
+	query := baseQuery.Where(whereClause, args...)
+	if len(types) > 0 {
+		query = query.Where("type IN ?", types)
+	}
+	if len(statuses) > 0 {
+		query = query.Where("status IN ?", statuses)
+	}
+	if len(tagsFilter) > 0 {
+		query = query.Where("tag IN ?", tagsFilter)
+	}
+
+	subQuery := query.Select("tag").
 		Where("tag != ''").
 		Order(order)
 

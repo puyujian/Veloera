@@ -56,6 +56,28 @@ type OpenAIModelsResponse struct {
 	Data    []OpenAIModel `json:"data"`
 	Success bool          `json:"success"`
 }
+// GetChannelTags 返回去重后的标签列表，可用于前端筛选下拉
+func GetChannelTags(c *gin.Context) {
+	offset, _ := strconv.Atoi(c.Query("offset"))
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	tags, err := model.GetPaginatedTags(offset, limit)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    tags,
+	})
+}
+
 
 func GetAllChannels(c *gin.Context) {
 	p, _ := strconv.Atoi(c.Query("p"))
@@ -123,6 +145,7 @@ func FetchUpstreamModels(c *gin.Context) {
 		})
 		return
 	}
+
 
 	baseURL := common.ChannelBaseURLs[channel.Type]
 	if channel.GetBaseURL() != "" {
@@ -211,9 +234,47 @@ func SearchChannels(c *gin.Context) {
 	modelKeyword := c.Query("model")
 	idSort, _ := strconv.ParseBool(c.Query("id_sort"))
 	enableTagMode, _ := strconv.ParseBool(c.Query("tag_mode"))
+
+	// 新增：解析多选过滤参数 types/statuses/tags（CSV）
+	parseCSVInts := func(s string) []int {
+		if s == "" {
+			return nil
+		}
+		parts := strings.Split(s, ",")
+		res := make([]int, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if v, err := strconv.Atoi(p); err == nil {
+				res = append(res, v)
+			}
+		}
+		return res
+	}
+	parseCSVStr := func(s string) []string {
+		if s == "" {
+			return nil
+		}
+		parts := strings.Split(s, ",")
+		res := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				res = append(res, p)
+			}
+		}
+		return res
+	}
+	types := parseCSVInts(c.Query("types"))
+	statuses := parseCSVInts(c.Query("statuses"))
+	tagsFilter := parseCSVStr(c.Query("tags"))
+
 	channelData := make([]*model.Channel, 0)
 	if enableTagMode {
-		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort)
+		// 先筛选标签集合，然后再聚合对应的渠道（保持与原有行为一致）
+		tags, err := model.SearchTags(keyword, group, modelKeyword, idSort, types, statuses, tagsFilter)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -225,12 +286,51 @@ func SearchChannels(c *gin.Context) {
 			if tag != nil && *tag != "" {
 				tagChannel, err := model.GetChannelsByTag(*tag, idSort)
 				if err == nil {
-					channelData = append(channelData, tagChannel...)
+					// 追加类型/状态/标签过滤（keyword/model 已在标签层过滤）
+					for _, ch := range tagChannel {
+						if len(types) > 0 {
+							ok := false
+							for _, t := range types {
+								if ch.Type == t {
+									ok = true
+									break
+								}
+							}
+							if !ok {
+								continue
+							}
+						}
+						if len(statuses) > 0 {
+							ok := false
+							for _, s := range statuses {
+								if ch.Status == s {
+									ok = true
+									break
+								}
+							}
+							if !ok {
+								continue
+							}
+						}
+						if len(tagsFilter) > 0 {
+							ok := false
+							for _, tg := range tagsFilter {
+								if ch.GetTag() == tg {
+									ok = true
+									break
+								}
+							}
+							if !ok {
+								continue
+							}
+						}
+						channelData = append(channelData, ch)
+					}
 				}
 			}
 		}
 	} else {
-		channels, err := model.SearchChannels(keyword, group, modelKeyword, idSort)
+		channels, err := model.SearchChannels(keyword, group, modelKeyword, idSort, types, statuses, tagsFilter)
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
