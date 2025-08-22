@@ -752,12 +752,16 @@ const ChannelsTable = () => {
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
+  // 测试结果缓存
+  const [testResultsCache, setTestResultsCache] = useState({});
   // 批量测试相关状态
   const [isBatchTesting, setIsBatchTesting] = useState(false);
   const [batchTestResults, setBatchTestResults] = useState([]);
   const [currentTestingModel, setCurrentTestingModel] = useState('');
   const [testProgress, setTestProgress] = useState({ completed: 0, total: 0 });
   const [concurrentLimit, setConcurrentLimit] = useState(3); // 默认并发数
+  // 批量测试控制
+  const [batchTestAbortController, setBatchTestAbortController] = useState(null);
 
   const removeRecord = (record) => {
     let newDataSource = [...channels];
@@ -786,7 +790,8 @@ const ChannelsTable = () => {
     let channelDates = [];
     let channelTags = {};
     for (let i = 0; i < channels.length; i++) {
-      channels[i].key = '' + channels[i].id;
+      // 为React Table设置key属性，同时保留原始的key字段（API密钥）
+      channels[i].rowKey = '' + channels[i].id;
       if (!enableTagMode) {
         channelDates.push(channels[i]);
       } else {
@@ -798,7 +803,8 @@ const ChannelsTable = () => {
           // not found, create a new tag
           channelTags[tag] = 1;
           tagChannelDates = {
-            key: tag,
+            rowKey: tag,  // React Table的key
+            key: tag,     // 标签名
             id: tag,
             tag: tag,
             name: '标签：' + tag,
@@ -850,7 +856,7 @@ const ChannelsTable = () => {
         tagChannelDates.response_time = tagChannelDates.response_time / 2;
       }
     }
-    // data.key = '' + data.id
+    // 为React Table设置rowKey属性
     setChannels(channelDates);
     if (channelDates.length >= pageSize) {
       setChannelCount(channelDates.length + pageSize);
@@ -933,7 +939,62 @@ const ChannelsTable = () => {
       });
     fetchGroups().then();
     loadChannelModels().then();
+    // 加载测试结果缓存
+    loadTestResultsCache();
   }, []);
+
+  // 加载测试结果缓存
+  const loadTestResultsCache = () => {
+    try {
+      const cached = localStorage.getItem('channel-test-results-cache');
+      if (cached) {
+        const parsedCache = JSON.parse(cached);
+        // 清理过期的缓存（超过24小时）
+        const now = Date.now();
+        const validCache = {};
+        Object.keys(parsedCache).forEach(channelId => {
+          const channelCache = parsedCache[channelId];
+          if (channelCache && (now - channelCache.timestamp) < 24 * 60 * 60 * 1000) {
+            validCache[channelId] = channelCache;
+          }
+        });
+        setTestResultsCache(validCache);
+        // 更新localStorage中的有效缓存
+        if (Object.keys(validCache).length !== Object.keys(parsedCache).length) {
+          localStorage.setItem('channel-test-results-cache', JSON.stringify(validCache));
+        }
+      }
+    } catch (e) {
+      console.error('加载测试结果缓存失败:', e);
+      localStorage.removeItem('channel-test-results-cache');
+    }
+  };
+
+  // 保存测试结果缓存
+  const saveTestResultsCache = (channelId, results) => {
+    try {
+      const newCache = {
+        ...testResultsCache,
+        [channelId]: {
+          results: results,
+          timestamp: Date.now()
+        }
+      };
+      setTestResultsCache(newCache);
+      localStorage.setItem('channel-test-results-cache', JSON.stringify(newCache));
+    } catch (e) {
+      console.error('保存测试结果缓存失败:', e);
+    }
+  };
+
+  // 获取缓存的测试结果
+  const getCachedTestResults = (channelId) => {
+    const channelCache = testResultsCache[channelId];
+    if (channelCache && (Date.now() - channelCache.timestamp) < 24 * 60 * 60 * 1000) {
+      return channelCache.results;
+    }
+    return null;
+  };
 
   const manageChannel = async (id, action, record, value) => {
     let data = { id };
@@ -1102,9 +1163,11 @@ const ChannelsTable = () => {
   };
 
   // 单个模型测试函数（用于并发）
-  const testSingleModel = async (model) => {
+  const testSingleModel = async (model, abortController) => {
     try {
-      const res = await API.get(`/api/channel/test/${currentTestChannel.id}?model=${model}`);
+      const res = await API.get(`/api/channel/test/${currentTestChannel.id}?model=${model}`, {
+        signal: abortController?.signal
+      });
       const { success, message, time } = res.data;
 
       const result = {
@@ -1124,6 +1187,10 @@ const ChannelsTable = () => {
 
       return result;
     } catch (error) {
+      // 如果是取消请求，抛出错误以停止执行
+      if (error.name === 'AbortError' || abortController?.signal?.aborted) {
+        throw error;
+      }
       return {
         model,
         success: false,
@@ -1134,15 +1201,20 @@ const ChannelsTable = () => {
   };
 
   // 分批并发处理函数
-  const processBatch = async (models, batchSize) => {
+  const processBatch = async (models, batchSize, abortController) => {
     const results = [];
 
     for (let i = 0; i < models.length; i += batchSize) {
+      // 检查是否被取消
+      if (abortController?.signal?.aborted) {
+        throw new Error('测试被用户取消');
+      }
+
       const batch = models.slice(i, i + batchSize);
       setCurrentTestingModel(`批次 ${Math.floor(i / batchSize) + 1}: ${batch.join(', ')}`);
 
       // 并发执行当前批次
-      const batchPromises = batch.map(model => testSingleModel(model));
+      const batchPromises = batch.map(model => testSingleModel(model, abortController));
       const batchResults = await Promise.allSettled(batchPromises);
 
       // 处理批次结果
@@ -1150,6 +1222,10 @@ const ChannelsTable = () => {
         if (result.status === 'fulfilled') {
           return result.value;
         } else {
+          // 如果是取消错误，直接抛出
+          if (result.reason?.name === 'AbortError' || abortController?.signal?.aborted) {
+            throw result.reason;
+          }
           return {
             model: batch[index],
             success: false,
@@ -1187,25 +1263,39 @@ const ChannelsTable = () => {
       return;
     }
 
+    // 创建 AbortController
+    const controller = new AbortController();
+    setBatchTestAbortController(controller);
+
     setIsBatchTesting(true);
     setBatchTestResults([]);
     setCurrentTestingModel('');
     setTestProgress({ completed: 0, total: models.length });
 
     try {
-      const results = await processBatch(models, concurrentLimit);
+      const results = await processBatch(models, concurrentLimit, controller);
 
       setIsBatchTesting(false);
       setCurrentTestingModel('');
+      setBatchTestAbortController(null);
 
       const successCount = results.filter(r => r.success).length;
       const failCount = results.filter(r => !r.success).length;
+
+      // 保存测试结果到缓存
+      saveTestResultsCache(currentTestChannel.id, results);
 
       showInfo(t(`批量测试完成：成功 ${successCount} 个，失败 ${failCount} 个`));
     } catch (error) {
       setIsBatchTesting(false);
       setCurrentTestingModel('');
-      showError(t('批量测试过程中发生错误：') + error.message);
+      setBatchTestAbortController(null);
+      
+      if (error.name === 'AbortError' || error.message.includes('取消')) {
+        showInfo(t('测试已取消'));
+      } else {
+        showError(t('批量测试过程中发生错误：') + error.message);
+      }
     }
   };
 
@@ -1801,6 +1891,7 @@ const ChannelsTable = () => {
         loading={loading}
         columns={getVisibleColumns()}
         dataSource={pageData}
+        rowKey="rowKey"
         pagination={{
           currentPage: activePage,
           pageSize: pageSize,
@@ -1858,7 +1949,25 @@ const ChannelsTable = () => {
       <Modal
         title={t('选择模型进行测试')}
         visible={showModelTestModal && currentTestChannel !== null}
+        onAfterOpen={() => {
+          // 加载缓存的测试结果
+          if (currentTestChannel) {
+            const cachedResults = getCachedTestResults(currentTestChannel.id);
+            if (cachedResults) {
+              setBatchTestResults(cachedResults);
+              setTestProgress({ 
+                completed: cachedResults.length, 
+                total: currentTestChannel.models?.split(',').filter(m => m.trim()).length || 0 
+              });
+            }
+          }
+        }}
         onCancel={() => {
+          // 停止正在进行的批量测试
+          if (batchTestAbortController) {
+            batchTestAbortController.abort();
+            setBatchTestAbortController(null);
+          }
           setShowModelTestModal(false);
           setModelSearchKeyword('');
           // 重置批量测试相关状态
@@ -1910,14 +2019,44 @@ const ChannelsTable = () => {
                       type='danger'
                       onClick={() => {
                         const failedModels = batchTestResults.filter(r => !r.success);
+                        const currentModels = currentTestChannel.models.split(',').map(m => m.trim());
+                        const failedModelNames = failedModels.map(r => r.model);
+                        const remainingModels = currentModels.filter(m => !failedModelNames.includes(m));
+                        
+                        // 检查是否会删除所有模型
+                        if (remainingModels.length === 0) {
+                          Modal.warning({
+                            title: t('无法删除所有模型'),
+                            content: t('删除这些失败的模型会导致渠道没有任何可用模型，这将使渠道无法正常工作。请至少保留一个模型或先添加新的可用模型。'),
+                          });
+                          return;
+                        }
+                        
                         Modal.confirm({
                           title: t('批量删除失败模型'),
-                          content: t('确定要删除所有 ${count} 个测试失败的模型吗？此操作不可撤销。').replace('${count}', failedModels.length),
+                          content: (
+                            <div>
+                              <p>{t('确定要删除所有 ${count} 个测试失败的模型吗？此操作不可撤销。').replace('${count}', failedModels.length)}</p>
+                              <p style={{ color: '#52c41a', marginTop: '8px' }}>
+                                {t('删除后将保留 ${remaining} 个正常模型：').replace('${remaining}', remainingModels.length)}
+                              </p>
+                              <div style={{ 
+                                maxHeight: '100px', 
+                                overflowY: 'auto', 
+                                background: '#f5f5f5', 
+                                padding: '8px', 
+                                borderRadius: '4px',
+                                marginTop: '4px'
+                              }}>
+                                {remainingModels.map((model, index) => (
+                                  <div key={index} style={{ fontSize: '12px' }}>{model}</div>
+                                ))}
+                              </div>
+                            </div>
+                          ),
                           onOk: async () => {
                             try {
-                              const currentModels = currentTestChannel.models.split(',').map(m => m.trim());
-                              const failedModelNames = failedModels.map(r => r.model);
-                              const newModels = currentModels.filter(m => !failedModelNames.includes(m));
+                              const newModels = remainingModels;
 
                               // 构建正确的更新数据格式，参考EditChannel.js的实现
                               const updateData = {
@@ -1927,13 +2066,13 @@ const ChannelsTable = () => {
                                 key: currentTestChannel.key,
                                 base_url: currentTestChannel.base_url || '',
                                 other: currentTestChannel.other || '',
-                                models: newModels.join(','), // 更新后的模型列表
+                                models: newModels.join(','), // 更新后的模型列表，转换为逗号分隔的字符串
                                 group: currentTestChannel.group || 'default',
                                 model_mapping: currentTestChannel.model_mapping || '',
                                 status: currentTestChannel.status,
                                 priority: currentTestChannel.priority || 0,
                                 weight: currentTestChannel.weight || 0,
-                                auto_ban: currentTestChannel.auto_ban || 1,
+                                auto_ban: currentTestChannel.auto_ban || 1, // 确保是数字类型
                                 test_model: currentTestChannel.test_model || '',
                                 openai_organization: currentTestChannel.openai_organization || '',
                                 status_code_mapping: currentTestChannel.status_code_mapping || '',
@@ -1955,7 +2094,11 @@ const ChannelsTable = () => {
                                   models: newModels.join(',')
                                 });
 
-                                setBatchTestResults(prev => prev.filter(r => r.success));
+                                // 从测试结果中移除被删除的失败模型
+                                setBatchTestResults(prev => prev.filter(r => !failedModelNames.includes(r.model)));
+
+                                // 刷新数据以确保与服务器同步
+                                await refresh();
 
                                 showSuccess(t('已删除 ${count} 个失败的模型').replace('${count}', failedModels.length));
                               } else {
@@ -2096,13 +2239,31 @@ const ChannelsTable = () => {
                               }}
                               icon={<IconClose />}
                               onClick={() => {
+                                // 检查删除后是否还有模型剩余
+                                const currentModels = currentTestChannel.models.split(',').map(m => m.trim());
+                                const newModels = currentModels.filter(m => m !== model.trim());
+                                
+                                if (newModels.length === 0) {
+                                  Modal.warning({
+                                    title: t('无法删除模型'),
+                                    content: t('删除模型 "${model}" 会导致渠道没有任何可用模型，这将使渠道无法正常工作。请先添加其他可用模型。').replace('${model}', model),
+                                  });
+                                  return;
+                                }
+                                
                                 Modal.confirm({
                                   title: t('确认删除模型'),
-                                  content: t('确定要从渠道中删除模型 "${model}" 吗？此操作不可撤销。').replace('${model}', model),
+                                  content: (
+                                    <div>
+                                      <p>{t('确定要从渠道中删除模型 "${model}" 吗？此操作不可撤销。').replace('${model}', model)}</p>
+                                      <p style={{ color: '#52c41a', marginTop: '8px' }}>
+                                        {t('删除后将剩余 ${remaining} 个模型').replace('${remaining}', newModels.length)}
+                                      </p>
+                                    </div>
+                                  ),
                                   onOk: async () => {
                                     try {
-                                      const currentModels = currentTestChannel.models.split(',').map(m => m.trim());
-                                      const newModels = currentModels.filter(m => m !== model.trim());
+                                      // 使用之前计算的newModels，避免重复计算
 
                                       // 构建正确的更新数据格式
                                       const updateData = {
@@ -2112,13 +2273,13 @@ const ChannelsTable = () => {
                                         key: currentTestChannel.key,
                                         base_url: currentTestChannel.base_url || '',
                                         other: currentTestChannel.other || '',
-                                        models: newModels.join(','), // 更新后的模型列表
+                                        models: newModels.join(','), // 更新后的模型列表，转换为逗号分隔的字符串
                                         group: currentTestChannel.group || 'default',
                                         model_mapping: currentTestChannel.model_mapping || '',
                                         status: currentTestChannel.status,
                                         priority: currentTestChannel.priority || 0,
                                         weight: currentTestChannel.weight || 0,
-                                        auto_ban: currentTestChannel.auto_ban || 1,
+                                        auto_ban: currentTestChannel.auto_ban || 1, // 确保是数字类型
                                         test_model: currentTestChannel.test_model || '',
                                         openai_organization: currentTestChannel.openai_organization || '',
                                         status_code_mapping: currentTestChannel.status_code_mapping || '',
@@ -2142,6 +2303,9 @@ const ChannelsTable = () => {
 
                                         // 从测试结果中移除该模型
                                         setBatchTestResults(prev => prev.filter(r => r.model !== model.trim()));
+
+                                        // 刷新数据以确保与服务器同步
+                                        await refresh();
 
                                         showSuccess(t('模型 "${model}" 已删除').replace('${model}', model));
                                       } else {
