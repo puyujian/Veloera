@@ -1220,41 +1220,60 @@ const ChannelsTable = () => {
     );
   };
 
-  // 单个模型测试函数（用于并发）
-  const testSingleModel = async (model, abortController) => {
-    try {
-      const res = await API.get(`/api/channel/test/${currentTestChannel.id}?model=${encodeURIComponent(model)}`, {
-        signal: abortController?.signal
-      });
-      const { success, message, time } = res.data;
-
-      const result = {
-        model,
-        success,
-        message: success ? `测试成功，耗时 ${time.toFixed(2)} 秒` : message,
-        time: success ? time : null
-      };
-
-      if (success) {
-        // 更新渠道状态
-        updateChannelProperty(currentTestChannel.id, (channel) => {
-          channel.response_time = time * 1000;
-          channel.test_time = Date.now() / 1000;
+  // 单个模型测试函数（用于并发）- 支持重试
+  const testSingleModel = async (model, abortController, maxRetries = 2) => {
+    let lastError = null;
+    
+    for (let retryCount = 0; retryCount <= maxRetries; retryCount++) {
+      try {
+        const res = await API.get(`/api/channel/test/${currentTestChannel.id}?model=${encodeURIComponent(model)}`, {
+          signal: abortController?.signal
         });
-      }
+        const { success, message, time } = res.data;
 
-      return result;
-    } catch (error) {
-      // 如果是取消请求，抛出错误以停止执行
-      if (isCancellationError(error) || abortController?.signal?.aborted) {
-        throw error;
+        const result = {
+          model,
+          success,
+          message: success ? `测试成功，耗时 ${time.toFixed(2)} 秒` : message,
+          time: success ? time : null,
+          retryCount,
+          isRetryable: !success && retryCount < maxRetries
+        };
+
+        if (success) {
+          // 更新渠道状态
+          updateChannelProperty(currentTestChannel.id, (channel) => {
+            channel.response_time = time * 1000;
+            channel.test_time = Date.now() / 1000;
+          });
+        }
+
+        return result;
+      } catch (error) {
+        lastError = error;
+        
+        // 如果是取消请求，立即抛出错误以停止执行
+        if (isCancellationError(error) || abortController?.signal?.aborted) {
+          throw error;
+        }
+
+        // 如果达到最大重试次数，返回失败结果
+        if (retryCount >= maxRetries) {
+          return {
+            model,
+            success: false,
+            message: error.message || '测试失败',
+            time: null,
+            retryCount,
+            isRetryable: true, // 仍然可以手动重试
+            error: error
+          };
+        }
+
+        // 重试前等待一段时间（指数退避）
+        const delay = Math.min(1000 * Math.pow(2, retryCount), 5000);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
-      return {
-        model,
-        success: false,
-        message: error.message || '测试失败',
-        time: null
-      };
     }
   };
 
@@ -1320,6 +1339,51 @@ const ChannelsTable = () => {
     }
 
     return results;
+  };
+
+  // 重试失败的模型
+  const retryFailedModels = async () => {
+    if (!currentTestChannel || isBatchTesting) {
+      return;
+    }
+
+    const failedModels = batchTestResults.filter(r => !r.success && r.isRetryable);
+    if (failedModels.length === 0) {
+      showInfo(t('没有可重试的失败模型'));
+      return;
+    }
+
+    const controller = new AbortController();
+    setBatchTestAbortController(controller);
+    setIsBatchTesting(true);
+    setCurrentTestingModel('重试失败模型...');
+
+    try {
+      const failedModelNames = failedModels.map(r => r.model);
+      const retryResults = await processBatch(failedModelNames, concurrentLimit, controller);
+      
+      // 更新批量测试结果，合并重试结果
+      const updatedResults = batchTestResults.map(result => {
+        const retryResult = retryResults.find(r => r.model === result.model);
+        return retryResult || result;
+      });
+      
+      setBatchTestResults(updatedResults);
+      
+      const newSuccessCount = retryResults.filter(r => r.success).length;
+      showInfo(t(`重试完成：成功 ${newSuccessCount} 个，失败 ${failedModelNames.length - newSuccessCount} 个`));
+      
+    } catch (error) {
+      if (isCancellationError(error)) {
+        showInfo(t('重试已取消'));
+      } else {
+        showError(t('重试过程中发生错误：') + error.message);
+      }
+    } finally {
+      setIsBatchTesting(false);
+      setCurrentTestingModel('');
+      setBatchTestAbortController(null);
+    }
   };
 
   // 批量测试所有模型（并发版本）
@@ -2082,6 +2146,19 @@ const ChannelsTable = () => {
                     </div>
                   )}
 
+                  {/* 重试失败模型按钮 */}
+                  {batchTestResults.length > 0 && batchTestResults.filter(r => !r.success && r.isRetryable).length > 0 && (
+                    <Button
+                      type='secondary'
+                      loading={isBatchTesting}
+                      onClick={retryFailedModels}
+                      disabled={isBatchTesting}
+                      style={{ backgroundColor: '#ffa940', borderColor: '#ffa940', color: '#fff' }}
+                    >
+                      {isBatchTesting ? t('重试中...') : t(`重试失败模型 (${batchTestResults.filter(r => !r.success && r.isRetryable).length})`)}
+                    </Button>
+                  )}
+
                   {batchTestResults.length > 0 && batchTestResults.filter(r => !r.success).length > 0 && (
                     <Button
                       type='danger'
@@ -2246,6 +2323,16 @@ const ChannelsTable = () => {
                     const isSuccess = testResult?.success;
                     const isFailed = testResult && !testResult.success;
                     const isTesting = isBatchTesting && currentTestingModel.includes(model.trim());
+                    const hasRetries = testResult?.retryCount > 0;
+                    const isRetryable = testResult?.isRetryable;
+
+                    // 构造状态描述
+                    let statusDesc = '';
+                    if (hasRetries && isSuccess) {
+                      statusDesc = `（重试${testResult.retryCount}次后成功）`;
+                    } else if (hasRetries && isFailed) {
+                      statusDesc = `（已重试${testResult.retryCount}次）`;
+                    }
 
                     return (
                       <div key={index} style={{
@@ -2277,7 +2364,18 @@ const ChannelsTable = () => {
                               testChannel(currentTestChannel, model);
                             }}
                           >
-                            {model}
+                            <div style={{ lineHeight: '1.2' }}>
+                              <div>{model}</div>
+                              {statusDesc && (
+                                <div style={{ 
+                                  fontSize: '10px', 
+                                  opacity: 0.8,
+                                  marginTop: '2px' 
+                                }}>
+                                  {statusDesc}
+                                </div>
+                              )}
+                            </div>
                           </Button>
                           <Button
                             theme='light'
@@ -2295,6 +2393,45 @@ const ChannelsTable = () => {
                                 .catch(() => showError(t('复制失败')));
                             }}
                           />
+                          {/* 单个模型重试按钮（仅在测试失败且可重试时显示） */}
+                          {isFailed && isRetryable && (
+                            <Button
+                              type='secondary'
+                              size='small'
+                              loading={isTesting}
+                              style={{
+                                height: '100%',
+                                padding: '10px 8px',
+                                borderRadius: '6px',
+                                backgroundColor: '#ffa940',
+                                borderColor: '#ffa940',
+                                color: '#fff'
+                              }}
+                              icon={<IconRefresh />}
+                              onClick={async () => {
+                                try {
+                                  setCurrentTestingModel(`重试 ${model.trim()}...`);
+                                  const controller = new AbortController();
+                                  const result = await testSingleModel(model.trim(), controller, 1);
+                                  
+                                  // 更新单个模型的测试结果
+                                  setBatchTestResults(prev => 
+                                    prev.map(r => r.model === model.trim() ? result : r)
+                                  );
+                                  
+                                  if (result.success) {
+                                    showSuccess(t(`模型 ${model.trim()} 重试成功`));
+                                  } else {
+                                    showError(t(`模型 ${model.trim()} 重试失败：${result.message}`));
+                                  }
+                                } catch (error) {
+                                  showError(t(`重试失败：${error.message}`));
+                                } finally {
+                                  setCurrentTestingModel('');
+                                }
+                              }}
+                            />
+                          )}
                           {/* 单个模型删除按钮（仅在测试失败时显示） */}
                           {isFailed && (
                             <Button

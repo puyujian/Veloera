@@ -131,26 +131,19 @@ func GetChannelsByTag(tag string, idSort bool) ([]*Channel, error) {
 	return channels, err
 }
 
-// SearchChannels 新增支持根据类型/状态/标签进行过滤（保持向后兼容）
-func SearchChannels(keyword string, group string, model string, idSort bool, types []int, statuses []int, tags []string) ([]*Channel, error) {
-	var channels []*Channel
+// buildWhereClause 构造通用的WHERE子句和参数
+func buildWhereClause(keyword string, group string, model string) (string, []interface{}) {
+	keyCol := "`key`"
+	groupCol := "`group`"
 	modelsCol := "`models`"
 
 	// 如果是 PostgreSQL，使用双引号
 	if common.UsingPostgreSQL {
 		keyCol = `"key"`
+		groupCol = `"group"`
 		modelsCol = `"models"`
 	}
 
-	order := "priority desc"
-	if idSort {
-		order = "id desc"
-	}
-
-	// 构造基础查询
-	baseQuery := DB.Model(&Channel{}).Omit(keyCol)
-
-	// 构造WHERE子句
 	var whereClause string
 	var args []interface{}
 	if group != "" && group != "null" {
@@ -167,8 +160,63 @@ func SearchChannels(keyword string, group string, model string, idSort bool, typ
 		whereClause = "(id = ? OR name LIKE ? OR " + keyCol + " = ?) AND " + modelsCol + " LIKE ?"
 		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+model+"%")
 	}
+	return whereClause, args
+}
 
-	// 追加类型/状态/标签过滤
+// applyTagFilter 应用标签过滤，支持完全匹配和子串包含两种模式
+func applyTagFilter(query *gorm.DB, tags []string, exactMatch bool) *gorm.DB {
+	if len(tags) == 0 {
+		return query
+	}
+
+	if exactMatch {
+		// 完全匹配模式
+		return query.Where("tag IN ?", tags)
+	} else {
+		// 子串包含模式
+		var tagConditions []string
+		var tagArgs []interface{}
+		for _, tag := range tags {
+			if common.UsingMySQL {
+				tagConditions = append(tagConditions, "CONCAT(',', COALESCE(tag, ''), ',') LIKE ?")
+			} else {
+				// sqlite, PostgreSQL
+				tagConditions = append(tagConditions, "(',' || COALESCE(tag, '') || ',') LIKE ?")
+			}
+			tagArgs = append(tagArgs, "%,"+tag+",%")
+		}
+		return query.Where("("+strings.Join(tagConditions, " OR ")+")", tagArgs...)
+	}
+}
+
+// SearchChannels 新增支持根据类型/状态/标签进行过滤（保持向后兼容）
+// exactTagMatch: true=完全匹配标签, false=子串包含匹配
+func SearchChannels(keyword string, group string, model string, idSort bool, types []int, statuses []int, tags []string) ([]*Channel, error) {
+	return SearchChannelsWithTagMode(keyword, group, model, idSort, types, statuses, tags, true)
+}
+
+// SearchChannelsWithTagMode 支持指定标签匹配模式的搜索
+func SearchChannelsWithTagMode(keyword string, group string, model string, idSort bool, types []int, statuses []int, tags []string, exactTagMatch bool) ([]*Channel, error) {
+	var channels []*Channel
+	keyCol := "`key`"
+
+	// 如果是 PostgreSQL，使用双引号
+	if common.UsingPostgreSQL {
+		keyCol = `"key"`
+	}
+
+	order := "priority desc"
+	if idSort {
+		order = "id desc"
+	}
+
+	// 构造基础查询
+	baseQuery := DB.Model(&Channel{}).Omit(keyCol)
+
+	// 构造WHERE子句
+	whereClause, args := buildWhereClause(keyword, group, model)
+
+	// 应用过滤条件
 	query := baseQuery.Where(whereClause, args...)
 	if len(types) > 0 {
 		query = query.Where("type IN ?", types)
@@ -176,9 +224,7 @@ func SearchChannels(keyword string, group string, model string, idSort bool, typ
 	if len(statuses) > 0 {
 		query = query.Where("status IN ?", statuses)
 	}
-	if len(tags) > 0 {
-		query = query.Where("tag IN ?", tags)
-	}
+	query = applyTagFilter(query, tags, exactTagMatch)
 
 	// 执行查询
 	err := query.Order(order).Find(&channels).Error
@@ -473,13 +519,19 @@ func GetPaginatedTags(offset int, limit int) ([]*string, error) {
 }
 
 // SearchTags 新增支持类型/状态/标签过滤（当 tag_mode=true 聚合时用于先筛选标签集合）
+// exactTagMatch: true=完全匹配标签, false=子串包含匹配
 func SearchTags(keyword string, group string, model string, idSort bool, types []int, statuses []int, tagsFilter []string) ([]*string, error) {
+	return SearchTagsWithTagMode(keyword, group, model, idSort, types, statuses, tagsFilter, true)
+}
+
+// SearchTagsWithTagMode 支持指定标签匹配模式的标签搜索
+func SearchTagsWithTagMode(keyword string, group string, model string, idSort bool, types []int, statuses []int, tagsFilter []string, exactTagMatch bool) ([]*string, error) {
 	var tags []*string
-	modelsCol := "`models`"
+	keyCol := "`key`"
 
 	// 如果是 PostgreSQL，使用双引号
 	if common.UsingPostgreSQL {
-		modelsCol = `"models"`
+		keyCol = `"key"`
 	}
 
 	order := "priority desc"
@@ -491,23 +543,9 @@ func SearchTags(keyword string, group string, model string, idSort bool, types [
 	baseQuery := DB.Model(&Channel{}).Omit(keyCol)
 
 	// 构造WHERE子句
-	var whereClause string
-	var args []interface{}
-	if group != "" && group != "null" {
-		var groupCondition string
-		if common.UsingMySQL {
-			groupCondition = `CONCAT(',', ` + groupCol + `, ',') LIKE ?`
-		} else {
-			// sqlite, PostgreSQL
-			groupCondition = `(',' || ` + groupCol + ` || ',') LIKE ?`
-		}
-		whereClause = "(id = ? OR name LIKE ? OR " + keyCol + " = ?) AND " + modelsCol + ` LIKE ? AND ` + groupCondition
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+model+"%", "%,"+group+",%")
-	} else {
-		whereClause = "(id = ? OR name LIKE ? OR " + keyCol + " = ?) AND " + modelsCol + " LIKE ?"
-		args = append(args, common.String2Int(keyword), "%"+keyword+"%", keyword, "%"+model+"%")
-	}
+	whereClause, args := buildWhereClause(keyword, group, model)
 
+	// 应用过滤条件
 	query := baseQuery.Where(whereClause, args...)
 	if len(types) > 0 {
 		query = query.Where("type IN ?", types)
@@ -515,10 +553,9 @@ func SearchTags(keyword string, group string, model string, idSort bool, types [
 	if len(statuses) > 0 {
 		query = query.Where("status IN ?", statuses)
 	}
-	if len(tagsFilter) > 0 {
-		query = query.Where("tag IN ?", tagsFilter)
-	}
+	query = applyTagFilter(query, tagsFilter, exactTagMatch)
 
+	// 构造子查询并获取独特标签
 	subQuery := query.Select("tag").
 		Where("tag != ''").
 		Order(order)
