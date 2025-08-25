@@ -2121,7 +2121,14 @@ const ChannelsTable = () => {
 
               {/* 操作按钮区域 */}
               <div style={{ marginBottom: '16px' }}>
-                <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px' }}>
+                {/* 第一行：主要操作按钮 */}
+                <div style={{ 
+                  display: 'flex', 
+                  flexWrap: 'wrap',
+                  gap: '8px', 
+                  alignItems: 'center', 
+                  marginBottom: '8px' 
+                }}>
                   <Button
                     type='primary'
                     loading={isBatchTesting}
@@ -2145,23 +2152,37 @@ const ChannelsTable = () => {
                       />
                     </div>
                   )}
+                </div>
 
-                  {/* 重试失败模型按钮 */}
-                  {batchTestResults.length > 0 && batchTestResults.filter(r => !r.success && r.isRetryable).length > 0 && (
-                    <Button
-                      type='secondary'
-                      loading={isBatchTesting}
-                      onClick={retryFailedModels}
-                      disabled={isBatchTesting}
-                      style={{ backgroundColor: '#ffa940', borderColor: '#ffa940', color: '#fff' }}
-                    >
-                      {isBatchTesting ? t('重试中...') : t(`重试失败模型 (${batchTestResults.filter(r => !r.success && r.isRetryable).length})`)}
-                    </Button>
-                  )}
+                {/* 第二行：失败模型处理按钮 */}
+                {batchTestResults.length > 0 && batchTestResults.filter(r => !r.success).length > 0 && (
+                  <div style={{ 
+                    display: 'flex', 
+                    flexWrap: 'wrap',
+                    gap: '8px', 
+                    alignItems: 'center'
+                  }}>
+                    {/* 重试失败模型按钮 */}
+                    {batchTestResults.filter(r => !r.success && r.isRetryable).length > 0 && (
+                      <Button
+                        type='secondary'
+                        loading={isBatchTesting}
+                        onClick={retryFailedModels}
+                        disabled={isBatchTesting}
+                        style={{ 
+                          backgroundColor: '#ffa940', 
+                          borderColor: '#ffa940', 
+                          color: '#fff',
+                          minWidth: 'fit-content'
+                        }}
+                      >
+                        {isBatchTesting ? t('重试中...') : t(`重试失败模型 (${batchTestResults.filter(r => !r.success && r.isRetryable).length})`)}
+                      </Button>
+                    )}
 
-                  {batchTestResults.length > 0 && batchTestResults.filter(r => !r.success).length > 0 && (
                     <Button
                       type='danger'
+                      style={{ minWidth: 'fit-content' }}
                       onClick={() => {
                         const failedModels = batchTestResults.filter(r => !r.success);
                         const currentModels = currentTestChannel.models.split(',').map(m => m.trim());
@@ -2258,8 +2279,8 @@ const ChannelsTable = () => {
                     >
                       {t('删除失败模型')} ({batchTestResults.filter(r => !r.success).length})
                     </Button>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* 测试进度显示 */}
                 {isBatchTesting && (
