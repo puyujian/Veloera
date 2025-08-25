@@ -754,7 +754,7 @@ const ChannelsTable = () => {
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
   // 测试结果缓存
-  const [testResultsCache, setTestResultsCache] = useState({});
+  const [testResultsCache, setTestResultsCache] = useState(() => Object.create(null));
   // 批量测试相关状态
   const [isBatchTesting, setIsBatchTesting] = useState(false);
   const [batchTestResults, setBatchTestResults] = useState([]);
@@ -971,8 +971,7 @@ const ChannelsTable = () => {
         
         Object.keys(parsedCache).forEach(channelId => {
           // 验证channelId是安全的字符串，防止原型污染
-          if (typeof channelId !== 'string' || 
-              channelId === '__proto__' || 
+          if (channelId === '__proto__' || 
               channelId === 'constructor' || 
               channelId === 'prototype') {
             return;
@@ -1005,17 +1004,17 @@ const ChannelsTable = () => {
   // 保存测试结果缓存
   const saveTestResultsCache = (channelId, results) => {
     try {
-      // 验证channelId是安全的字符串，防止原型污染
-      if (typeof channelId !== 'string' || 
-          channelId === '__proto__' || 
-          channelId === 'constructor' || 
-          channelId === 'prototype') {
+      // 将channelId转换为字符串并验证安全性，防止原型污染
+      const id = String(channelId);
+      if (id === '__proto__' || 
+          id === 'constructor' || 
+          id === 'prototype') {
         console.warn('无效的channelId，跳过缓存保存:', channelId);
         return;
       }
       
       const newCache = Object.assign(Object.create(null), testResultsCache, {
-        [channelId]: {
+        [id]: {
           results: results,
           timestamp: Date.now()
         }
@@ -1029,15 +1028,15 @@ const ChannelsTable = () => {
 
   // 获取缓存的测试结果
   const getCachedTestResults = (channelId) => {
-    // 验证channelId是安全的字符串，防止原型污染
-    if (typeof channelId !== 'string' || 
-        channelId === '__proto__' || 
-        channelId === 'constructor' || 
-        channelId === 'prototype') {
+    // 将channelId转换为字符串并验证安全性，防止原型污染
+    const id = String(channelId);
+    if (id === '__proto__' || 
+        id === 'constructor' || 
+        id === 'prototype') {
       return null;
     }
     
-    const channelCache = testResultsCache[channelId];
+    const channelCache = testResultsCache[id];
     if (channelCache && (Date.now() - channelCache.timestamp) < 24 * 60 * 60 * 1000) {
       return channelCache.results;
     }
@@ -1147,11 +1146,27 @@ const ChannelsTable = () => {
       return;
     }
     setSearching(true);
-    const typesParam = nextTypes && nextTypes.length > 0 ? `&types=${nextTypes.map(Number).join(',')}` : '';
-    const statusParam = nextStatuses && nextStatuses.length > 0 ? `&statuses=${nextStatuses.map(Number).join(',')}` : '';
-    const tagsParam = nextTags && nextTags.length > 0 ? `&tags=${nextTags.join(',')}` : '';
-    const url = `/api/channel/search?keyword=${searchKeyword}&group=${searchGroup}&model=${searchModel}&id_sort=${idSort}&tag_mode=${enableTagMode}${typesParam}${statusParam}${tagsParam}`;
-    const res = await API.get(url);
+    const params = new URLSearchParams();
+    
+    // 添加基础搜索参数
+    params.append('keyword', searchKeyword);
+    params.append('group', searchGroup);
+    params.append('model', searchModel);
+    params.append('id_sort', String(idSort));
+    params.append('tag_mode', String(enableTagMode));
+    
+    // 条件添加数组参数
+    if (nextTypes && nextTypes.length > 0) {
+      params.append('types', nextTypes.map(Number).join(','));
+    }
+    if (nextStatuses && nextStatuses.length > 0) {
+      params.append('statuses', nextStatuses.map(Number).join(','));
+    }
+    if (nextTags && nextTags.length > 0) {
+      params.append('tags', nextTags.join(','));
+    }
+    
+    const res = await API.get(`/api/channel/search?${params.toString()}`);
     const { success, message, data } = res.data;
     if (success) {
       setChannelFormat(data, enableTagMode);
