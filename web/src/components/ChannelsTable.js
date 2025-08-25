@@ -760,6 +760,7 @@ const ChannelsTable = () => {
   const [currentTestingModel, setCurrentTestingModel] = useState('');
   const [testProgress, setTestProgress] = useState({ completed: 0, total: 0 });
   const [concurrentLimit, setConcurrentLimit] = useState(3); // 默认并发数
+  const [batchTestDelay, setBatchTestDelay] = useState(200); // 批次间延迟(ms)
   // 批量测试控制
   const [batchTestAbortController, setBatchTestAbortController] = useState(null);
 
@@ -943,6 +944,20 @@ const ChannelsTable = () => {
     loadTestResultsCache();
   }, []);
 
+  // 监听模态框可见性变化，加载缓存的测试结果
+  useEffect(() => {
+    if (showModelTestModal && currentTestChannel) {
+      const cachedResults = getCachedTestResults(currentTestChannel.id);
+      if (cachedResults) {
+        setBatchTestResults(cachedResults);
+        setTestProgress({ 
+          completed: cachedResults.length, 
+          total: currentTestChannel.models?.split(',').filter(m => m.trim()).length || 0 
+        });
+      }
+    }
+  }, [showModelTestModal, currentTestChannel]);
+
   // 加载测试结果缓存
   const loadTestResultsCache = () => {
     try {
@@ -951,13 +966,29 @@ const ChannelsTable = () => {
         const parsedCache = JSON.parse(cached);
         // 清理过期的缓存（超过24小时）
         const now = Date.now();
-        const validCache = {};
+        const validCache = Object.create(null);
+        
         Object.keys(parsedCache).forEach(channelId => {
+          // 验证channelId是安全的字符串，防止原型污染
+          if (typeof channelId !== 'string' || 
+              channelId === '__proto__' || 
+              channelId === 'constructor' || 
+              channelId === 'prototype') {
+            return;
+          }
+          
           const channelCache = parsedCache[channelId];
-          if (channelCache && (now - channelCache.timestamp) < 24 * 60 * 60 * 1000) {
+          // 验证channelCache是对象且timestamp是有限数字
+          if (channelCache && 
+              typeof channelCache === 'object' &&
+              channelCache !== null &&
+              typeof channelCache.timestamp === 'number' &&
+              Number.isFinite(channelCache.timestamp) &&
+              (now - channelCache.timestamp) < 24 * 60 * 60 * 1000) {
             validCache[channelId] = channelCache;
           }
         });
+        
         setTestResultsCache(validCache);
         // 更新localStorage中的有效缓存
         if (Object.keys(validCache).length !== Object.keys(parsedCache).length) {
@@ -973,13 +1004,21 @@ const ChannelsTable = () => {
   // 保存测试结果缓存
   const saveTestResultsCache = (channelId, results) => {
     try {
-      const newCache = {
-        ...testResultsCache,
+      // 验证channelId是安全的字符串，防止原型污染
+      if (typeof channelId !== 'string' || 
+          channelId === '__proto__' || 
+          channelId === 'constructor' || 
+          channelId === 'prototype') {
+        console.warn('无效的channelId，跳过缓存保存:', channelId);
+        return;
+      }
+      
+      const newCache = Object.assign(Object.create(null), testResultsCache, {
         [channelId]: {
           results: results,
           timestamp: Date.now()
         }
-      };
+      });
       setTestResultsCache(newCache);
       localStorage.setItem('channel-test-results-cache', JSON.stringify(newCache));
     } catch (e) {
@@ -989,6 +1028,14 @@ const ChannelsTable = () => {
 
   // 获取缓存的测试结果
   const getCachedTestResults = (channelId) => {
+    // 验证channelId是安全的字符串，防止原型污染
+    if (typeof channelId !== 'string' || 
+        channelId === '__proto__' || 
+        channelId === 'constructor' || 
+        channelId === 'prototype') {
+      return null;
+    }
+    
     const channelCache = testResultsCache[channelId];
     if (channelCache && (Date.now() - channelCache.timestamp) < 24 * 60 * 60 * 1000) {
       return channelCache.results;
@@ -1205,7 +1252,7 @@ const ChannelsTable = () => {
     const results = [];
 
     for (let i = 0; i < models.length; i += batchSize) {
-      // 检查是否被取消
+      // 4) 每次迭代都检查取消状态
       if (abortController?.signal?.aborted) {
         throw new Error('测试被用户取消');
       }
@@ -1213,9 +1260,19 @@ const ChannelsTable = () => {
       const batch = models.slice(i, i + batchSize);
       setCurrentTestingModel(`批次 ${Math.floor(i / batchSize) + 1}: ${batch.join(', ')}`);
 
+      // 4) 在await之前再次检查取消状态
+      if (abortController?.signal?.aborted) {
+        throw new Error('测试被用户取消');
+      }
+
       // 并发执行当前批次
       const batchPromises = batch.map(model => testSingleModel(model, abortController));
       const batchResults = await Promise.allSettled(batchPromises);
+
+      // 4) 在await之后检查取消状态
+      if (abortController?.signal?.aborted) {
+        throw new Error('测试被用户取消');
+      }
 
       // 处理批次结果
       const processedResults = batchResults.map((result, index) => {
@@ -1241,9 +1298,13 @@ const ChannelsTable = () => {
       setTestProgress({ completed: results.length, total: models.length });
       setBatchTestResults([...results]);
 
-      // 批次间添加短暂延迟
+      // 3) 批次间使用可配置的延迟
       if (i + batchSize < models.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // 4) 在延迟期间也要检查取消状态
+        if (abortController?.signal?.aborted) {
+          throw new Error('测试被用户取消');
+        }
+        await new Promise(resolve => setTimeout(resolve, batchTestDelay));
       }
     }
 
@@ -1252,8 +1313,13 @@ const ChannelsTable = () => {
 
   // 批量测试所有模型（并发版本）
   const testAllModels = async () => {
-    if (!currentTestChannel || !currentTestChannel.models) {
-      showError(t('没有可测试的模型'));
+    // 1) 验证currentTestChannel存在且具有期望的属性
+    if (!currentTestChannel || 
+        typeof currentTestChannel !== 'object' ||
+        !currentTestChannel.id ||
+        !currentTestChannel.models ||
+        typeof currentTestChannel.models !== 'string') {
+      showError(t('当前测试渠道无效或缺少必需属性'));
       return;
     }
 
@@ -1272,12 +1338,9 @@ const ChannelsTable = () => {
     setCurrentTestingModel('');
     setTestProgress({ completed: 0, total: models.length });
 
+    // 2) 使用try-catch-finally包装整个异步测试逻辑
     try {
       const results = await processBatch(models, concurrentLimit, controller);
-
-      setIsBatchTesting(false);
-      setCurrentTestingModel('');
-      setBatchTestAbortController(null);
 
       const successCount = results.filter(r => r.success).length;
       const failCount = results.filter(r => !r.success).length;
@@ -1287,15 +1350,17 @@ const ChannelsTable = () => {
 
       showInfo(t(`批量测试完成：成功 ${successCount} 个，失败 ${failCount} 个`));
     } catch (error) {
-      setIsBatchTesting(false);
-      setCurrentTestingModel('');
-      setBatchTestAbortController(null);
-      
       if (error.name === 'AbortError' || error.message.includes('取消')) {
         showInfo(t('测试已取消'));
       } else {
         showError(t('批量测试过程中发生错误：') + error.message);
       }
+    } finally {
+      // 3) 确保在finally中重置状态
+      setIsBatchTesting(false);
+      setCurrentTestingModel('');
+      setBatchTestAbortController(null);
+      setShowBatchTestResults(true);
     }
   };
 
@@ -1949,19 +2014,6 @@ const ChannelsTable = () => {
       <Modal
         title={t('选择模型进行测试')}
         visible={showModelTestModal && currentTestChannel !== null}
-        onAfterOpen={() => {
-          // 加载缓存的测试结果
-          if (currentTestChannel) {
-            const cachedResults = getCachedTestResults(currentTestChannel.id);
-            if (cachedResults) {
-              setBatchTestResults(cachedResults);
-              setTestProgress({ 
-                completed: cachedResults.length, 
-                total: currentTestChannel.models?.split(',').filter(m => m.trim()).length || 0 
-              });
-            }
-          }
-        }}
         onCancel={() => {
           // 停止正在进行的批量测试
           if (batchTestAbortController) {
