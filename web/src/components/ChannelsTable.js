@@ -17,6 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import React, { useEffect, useState } from 'react';
+import axios from 'axios';
 import {
   API,
   isMobile,
@@ -1209,10 +1210,20 @@ const ChannelsTable = () => {
     }
   };
 
+  // 统一的取消检测函数
+  const isCancellationError = (error) => {
+    return (
+      error.name === 'AbortError' ||
+      error.name === 'CanceledError' ||
+      axios.isCancel(error) ||
+      error.code === 'ERR_CANCELED'
+    );
+  };
+
   // 单个模型测试函数（用于并发）
   const testSingleModel = async (model, abortController) => {
     try {
-      const res = await API.get(`/api/channel/test/${currentTestChannel.id}?model=${model}`, {
+      const res = await API.get(`/api/channel/test/${currentTestChannel.id}?model=${encodeURIComponent(model)}`, {
         signal: abortController?.signal
       });
       const { success, message, time } = res.data;
@@ -1235,7 +1246,7 @@ const ChannelsTable = () => {
       return result;
     } catch (error) {
       // 如果是取消请求，抛出错误以停止执行
-      if (error.name === 'AbortError' || abortController?.signal?.aborted) {
+      if (isCancellationError(error) || abortController?.signal?.aborted) {
         throw error;
       }
       return {
@@ -1280,7 +1291,7 @@ const ChannelsTable = () => {
           return result.value;
         } else {
           // 如果是取消错误，直接抛出
-          if (result.reason?.name === 'AbortError' || abortController?.signal?.aborted) {
+          if (isCancellationError(result.reason) || abortController?.signal?.aborted) {
             throw result.reason;
           }
           return {
@@ -1323,7 +1334,13 @@ const ChannelsTable = () => {
       return;
     }
 
-    const models = currentTestChannel.models.split(',').filter(model => model.trim());
+    // 修剪空白、去重并过滤空字符串
+    const models = [...new Set(
+      currentTestChannel.models
+        .split(',')
+        .map(model => model.trim())
+        .filter(model => model.length > 0)
+    )];
     if (models.length === 0) {
       showError(t('没有可测试的模型'));
       return;
@@ -1350,7 +1367,7 @@ const ChannelsTable = () => {
 
       showInfo(t(`批量测试完成：成功 ${successCount} 个，失败 ${failCount} 个`));
     } catch (error) {
-      if (error.name === 'AbortError' || error.message.includes('取消')) {
+      if (isCancellationError(error) || error.message.includes('取消')) {
         showInfo(t('测试已取消'));
       } else {
         showError(t('批量测试过程中发生错误：') + error.message);
@@ -1360,7 +1377,6 @@ const ChannelsTable = () => {
       setIsBatchTesting(false);
       setCurrentTestingModel('');
       setBatchTestAbortController(null);
-      setShowBatchTestResults(true);
     }
   };
 
@@ -2122,9 +2138,9 @@ const ChannelsTable = () => {
                                 group: currentTestChannel.group || 'default',
                                 model_mapping: currentTestChannel.model_mapping || '',
                                 status: currentTestChannel.status,
-                                priority: currentTestChannel.priority || 0,
-                                weight: currentTestChannel.weight || 0,
-                                auto_ban: currentTestChannel.auto_ban || 1, // 确保是数字类型
+                                priority: currentTestChannel.priority ?? 0,
+                                weight: currentTestChannel.weight ?? 0,
+                                auto_ban: currentTestChannel.auto_ban ?? 1, // 确保是数字类型
                                 test_model: currentTestChannel.test_model || '',
                                 openai_organization: currentTestChannel.openai_organization || '',
                                 status_code_mapping: currentTestChannel.status_code_mapping || '',
@@ -2329,9 +2345,9 @@ const ChannelsTable = () => {
                                         group: currentTestChannel.group || 'default',
                                         model_mapping: currentTestChannel.model_mapping || '',
                                         status: currentTestChannel.status,
-                                        priority: currentTestChannel.priority || 0,
-                                        weight: currentTestChannel.weight || 0,
-                                        auto_ban: currentTestChannel.auto_ban || 1, // 确保是数字类型
+                                        priority: currentTestChannel.priority ?? 0,
+                                        weight: currentTestChannel.weight ?? 0,
+                                        auto_ban: currentTestChannel.auto_ban ?? 1, // 确保是数字类型
                                         test_model: currentTestChannel.test_model || '',
                                         openai_organization: currentTestChannel.openai_organization || '',
                                         status_code_mapping: currentTestChannel.status_code_mapping || '',
