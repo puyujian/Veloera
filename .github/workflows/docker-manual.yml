@@ -1,7 +1,11 @@
 name: Manual Docker Build
 
 on:
-  # 仅支持手动触发
+  # 提交时自动触发
+  push:
+    branches:
+      - main
+  # 支持手动触发（可选参数）
   workflow_dispatch:
     inputs:
       tag:
@@ -27,12 +31,6 @@ on:
         required: false
         default: 'linux/amd64,linux/arm64'
         type: string
-  # 支持提交触发（仅当有特定标记时）
-  push:
-    branches:
-      - main
-    paths:
-      - 'docker-build-trigger'
 
 jobs:
   docker-build:
