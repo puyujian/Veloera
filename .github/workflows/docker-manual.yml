@@ -102,12 +102,10 @@ jobs:
           build-args: |
             VERSION=${{ env.VERSION }}
             BUILD_DATE=${{ env.BUILD_DATE }}
+            BUILDKIT_INLINE_CACHE=1
           # 使用 GitHub Actions cache 提升构建速度
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # 启用 BuildKit inline cache
-          build-contexts: |
-            buildkit-inline-cache=1
 
       - name: 构建结果摘要
         run: |
