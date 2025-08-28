@@ -1,0 +1,119 @@
+name: Manual Docker Build
+
+on:
+  # 仅支持手动触发
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '镜像标签 (默认为 latest)'
+        required: false
+        default: 'latest'
+        type: string
+      registry:
+        description: '镜像仓库'
+        required: false
+        default: 'ghcr.io'
+        type: choice
+        options:
+        - ghcr.io
+        - docker.io
+      push_to_registry:
+        description: '是否推送到镜像仓库'
+        required: false
+        default: true
+        type: boolean
+      platforms:
+        description: '构建平台'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+        type: string
+  # 支持提交触发（仅当有特定标记时）
+  push:
+    branches:
+      - main
+    paths:
+      - 'docker-build-trigger'
+
+jobs:
+  docker-build:
+    name: 构建 Docker 镜像
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 生成版本信息
+        run: |
+          if git describe --tags --exact-match HEAD 2>/dev/null; then
+            echo "VERSION=$(git describe --tags)" >> $GITHUB_ENV
+          else
+            echo "VERSION=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          fi
+          echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+
+      - name: 设置 QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录到 GitHub Container Registry
+        if: ${{ inputs.registry == 'ghcr.io' && (inputs.push_to_registry || inputs.push_to_registry == null) }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 登录到 Docker Hub
+        if: ${{ inputs.registry == 'docker.io' && (inputs.push_to_registry || inputs.push_to_registry == null) }}
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 生成镜像元数据
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ inputs.registry || 'ghcr.io' }}/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ inputs.tag || 'latest' }}
+            type=raw,value=${{ env.VERSION }}
+            type=sha,prefix={{branch}}-
+
+      - name: 构建并推送 Docker 镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          push: ${{ inputs.push_to_registry || inputs.push_to_registry == null }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ env.VERSION }}
+            BUILD_DATE=${{ env.BUILD_DATE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 构建结果摘要
+        run: |
+          echo "## Docker 构建完成 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**构建信息:**" >> $GITHUB_STEP_SUMMARY
+          echo "- 版本: \`${{ env.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 标签: \`${{ inputs.tag || 'latest' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 仓库: \`${{ inputs.registry || 'ghcr.io' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 平台: \`${{ inputs.platforms || 'linux/amd64,linux/arm64' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 推送: \`${{ inputs.push_to_registry || inputs.push_to_registry == null }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**镜像标签:**" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.meta.outputs.tags }}' | sed 's/^/- `/' | sed 's/$/`/' >> $GITHUB_STEP_SUMMARY
