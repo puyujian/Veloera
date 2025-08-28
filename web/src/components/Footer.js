@@ -28,7 +28,12 @@ const FooterBar = () => {
     '由 Veloera 驱动',
     '功能与速度由 Veloera 提供',
     'Made with ♥️ by Veloera',
-    'Powered by Veloera'
+    'Powered by Veloera',
+    'Veloera 强力驱动',
+    '基于 Veloera 构建',
+    'Built on Veloera',
+    'Driven by Veloera',
+    'Veloera Powered',
   ];
 
   const loadFooter = () => {

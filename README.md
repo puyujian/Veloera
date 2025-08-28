@@ -95,7 +95,8 @@ docker-compose up -d
 <a href="https://edgeone.ai/?from=github" target="_blank">
   <img src="https://edgeone.ai/_next/static/media/headLogo.daeb48ad.png?auto=format&fit=max&w=200" width=200 />
 </a>
-<br />CDN acceleration and security protection for this project are sponsored by Tencent EdgeOne.
+<br />
+CDN acceleration and security protection for this project are sponsored by Tencent EdgeOne: EdgeOne offers a long-term free plan with unlimited traffic and requests, covering Mainland China nodes, with no overage charges. Interested friends can click the link below to claim it: https://edgeone.ai/?from=github
 
 <br />
 
