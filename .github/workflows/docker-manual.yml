@@ -84,7 +84,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ inputs.registry || 'ghcr.io' }}/${{ github.repository }}
+            ${{ inputs.registry || 'ghcr.io' }}/${{ github.repository_owner }}/veloera
           tags: |
             type=raw,value=${{ inputs.tag || 'latest' }}
             type=raw,value=${{ env.VERSION }}
