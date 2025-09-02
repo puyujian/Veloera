@@ -37,8 +37,9 @@ jobs:
     name: 构建 Docker 镜像
     runs-on: ubuntu-latest
     permissions:
+      contents: write
       packages: write
-      contents: read
+      actions: write
     
     steps:
       - name: 检出代码
@@ -79,12 +80,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: 设置小写仓库所有者
+        id: lowercase
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: 生成镜像元数据
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ${{ inputs.registry || 'ghcr.io' }}/${{ github.repository_owner }}/veloera
+            ${{ inputs.registry || 'ghcr.io' }}/${{ steps.lowercase.outputs.owner }}/veloera
           tags: |
             type=raw,value=${{ inputs.tag || 'latest' }}
             type=raw,value=${{ env.VERSION }}
