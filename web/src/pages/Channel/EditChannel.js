@@ -16,7 +16,7 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -239,12 +239,15 @@ const MODEL_MAPPING_EXAMPLE = {
 };
 
 // ModelMappingEditor component for visual key-value editing
-const ModelMappingEditor = ({ value, onChange, placeholder }) => {
+const ModelMappingEditor = ({ value, onChange, placeholder, onRealtimeChange }) => {
   const { t } = useTranslation();
   const [mappingPairs, setMappingPairs] = useState([]);
   const [mode, setMode] = useState('visual'); // 'visual' or 'json'
   const [jsonValue, setJsonValue] = useState('');
   const [jsonError, setJsonError] = useState('');
+
+  // 用于标记是否是内部更新，避免循环更新
+  const isInternalUpdateRef = useRef(false);
 
   // Parse JSON value to key-value pairs
   const parseJsonToMappings = (jsonStr) => {
@@ -254,10 +257,13 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
     try {
       const parsed = JSON.parse(jsonStr);
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        return Object.entries(parsed).map(([key, value]) => ({ 
-          id: Date.now() + Math.random(), 
-          key, 
-          value 
+        const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
+        return Object.entries(parsed)
+          .filter(([k]) => !unsafe.has(k))
+          .map(([key, value]) => ({
+          id: Date.now() + Math.random(),
+          key,
+          value
         }));
       }
       return [];
@@ -271,10 +277,12 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
     if (!pairs || pairs.length === 0) {
       return '';
     }
-    const obj = {};
+    const obj = Object.create(null);
+    const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
     pairs.forEach(pair => {
       if (pair.key && pair.key.trim() !== '') {
-        obj[pair.key.trim()] = pair.value || '';
+        const k = pair.key.trim();
+        if (!unsafe.has(k)) obj[k] = pair.value || '';
       }
     });
     return Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
@@ -282,10 +290,14 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
 
   // Initialize component state from value prop
   useEffect(() => {
-    const pairs = parseJsonToMappings(value);
-    setMappingPairs(pairs.length > 0 ? pairs : [{ id: Date.now() + Math.random(), key: '', value: '' }]);
-    setJsonValue(value || '');
-    setJsonError('');
+    // 只有在非内部更新时才同步外部状态
+    if (!isInternalUpdateRef.current) {
+      const pairs = parseJsonToMappings(value);
+      setMappingPairs(pairs.length > 0 ? pairs : [{ id: Date.now() + Math.random(), key: '', value: '' }]);
+      setJsonValue(value || '');
+      setJsonError('');
+    }
+    isInternalUpdateRef.current = false;
   }, [value]);
 
   // Add new mapping pair
@@ -299,19 +311,35 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
     const newPairs = mappingPairs.filter((_, i) => i !== index);
     const finalPairs = newPairs.length > 0 ? newPairs : [{ id: Date.now() + Math.random(), key: '', value: '' }];
     setMappingPairs(finalPairs);
-    // Update parent with new JSON
+
+    // 立即更新父组件
     const jsonStr = mappingsToJson(finalPairs);
+    isInternalUpdateRef.current = true;
     onChange(jsonStr);
+
+    // 触发实时同步
+    if (onRealtimeChange) {
+      onRealtimeChange(jsonStr);
+    }
   };
 
-  // Update mapping pair
+  // Update mapping pair - 只更新本地状态，不触发父组件更新
   const updateMappingPair = (index, field, value) => {
     const newPairs = [...mappingPairs];
     newPairs[index] = { ...newPairs[index], [field]: value };
     setMappingPairs(newPairs);
-    
-    // Update parent with new JSON
-    const jsonStr = mappingsToJson(newPairs);
+
+    // 触发实时同步回调，但不更新父组件的 model_mapping 状态
+    if (onRealtimeChange) {
+      const jsonStr = mappingsToJson(newPairs);
+      onRealtimeChange(jsonStr);
+    }
+  };
+
+  // 在失去焦点时同步到父组件
+  const handleInputBlur = () => {
+    const jsonStr = mappingsToJson(mappingPairs);
+    isInternalUpdateRef.current = true;
     onChange(jsonStr);
   };
 
@@ -331,10 +359,13 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
         } else {
           const parsed = JSON.parse(jsonValue);
           if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            const pairs = Object.entries(parsed).map(([key, value]) => ({ 
-              id: Date.now() + Math.random(), 
-              key, 
-              value 
+            const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
+              const pairs = Object.entries(parsed)
+                .filter(([k]) => !unsafe.has(k))
+                .map(([key, value]) => ({
+                id: Date.now() + Math.random(),
+                key,
+                value
             }));
             setMappingPairs(pairs.length > 0 ? pairs : [{ id: Date.now() + Math.random(), key: '', value: '' }]);
             setJsonError('');
@@ -354,24 +385,48 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
   // Handle JSON input change
   const handleJsonChange = (newValue) => {
     setJsonValue(newValue);
-    
-    // Validate JSON and update parent
+
+    // Validate JSON
     if (newValue.trim() === '') {
       setJsonError('');
-      onChange('');
+      // 触发实时同步
+      if (onRealtimeChange) {
+        onRealtimeChange('');
+      }
       return;
     }
-    
+
     try {
       const parsed = JSON.parse(newValue);
       if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
         setJsonError('');
-        onChange(newValue);
+        // 触发实时同步
+        if (onRealtimeChange) {
+          onRealtimeChange(newValue);
+        }
       } else {
         setJsonError(t('请输入有效的JSON对象格式'));
       }
     } catch (error) {
       setJsonError(t('JSON格式错误: {{message}}', { message: error.message }));
+    }
+  };
+
+  // 在 JSON 模式失去焦点时同步到父组件
+  const handleJsonBlur = () => {
+    if (!jsonError && jsonValue.trim() !== '') {
+      try {
+        const parsed = JSON.parse(jsonValue);
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          isInternalUpdateRef.current = true;
+          onChange(jsonValue);
+        }
+      } catch (error) {
+        // 忽略错误，不更新父组件
+      }
+    } else if (jsonValue.trim() === '') {
+      isInternalUpdateRef.current = true;
+      onChange('');
     }
   };
 
@@ -381,10 +436,15 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
     if (mode === 'visual') {
       const pairs = parseJsonToMappings(templateJson);
       setMappingPairs(pairs);
-      onChange(templateJson);
     } else {
       setJsonValue(templateJson);
-      handleJsonChange(templateJson);
+    }
+
+    // 立即更新父组件和触发实时同步
+    isInternalUpdateRef.current = true;
+    onChange(templateJson);
+    if (onRealtimeChange) {
+      onRealtimeChange(templateJson);
     }
   };
 
@@ -395,7 +455,7 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
           <Button
             type={mode === 'visual' ? 'primary' : 'tertiary'}
             onClick={() => switchMode('visual')}
-            style={{ 
+            style={{
               borderRadius: '6px 0 0 6px'
             }}
           >
@@ -404,7 +464,7 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
           <Button
             type={mode === 'json' ? 'primary' : 'tertiary'}
             onClick={() => switchMode('json')}
-            style={{ 
+            style={{
               borderRadius: '0 6px 6px 0'
             }}
           >
@@ -428,13 +488,14 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
           <div style={{ marginBottom: 10 }}>
             <Typography.Text type="secondary">{placeholder}</Typography.Text>
           </div>
-          
+
           {mappingPairs.map((pair, index) => (
             <div key={pair.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
               <Input
                 placeholder={t('目标模型名称')}
                 value={pair.key}
                 onChange={(value) => updateMappingPair(index, 'key', value)}
+                onBlur={() => handleInputBlur(index, 'key')}
                 style={{ flex: 1, marginRight: 8 }}
               />
               <Typography.Text style={{ margin: '0 8px' }}>→</Typography.Text>
@@ -442,6 +503,7 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
                 placeholder={t('实际模型名称')}
                 value={pair.value}
                 onChange={(value) => updateMappingPair(index, 'value', value)}
+                onBlur={() => handleInputBlur(index, 'value')}
                 style={{ flex: 1, marginRight: 8 }}
               />
               <Button
@@ -453,7 +515,7 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
               />
             </div>
           ))}
-          
+
           <Button
             type="tertiary"
             icon={<IconPlusCircle />}
@@ -473,6 +535,7 @@ const ModelMappingEditor = ({ value, onChange, placeholder }) => {
             }
             value={jsonValue}
             onChange={handleJsonChange}
+            onBlur={handleJsonBlur}
             autosize
             autoComplete='new-password'
           />
@@ -586,7 +649,7 @@ const EditChannel = (props) => {
     if (!mappingValue || typeof mappingValue !== 'string' || mappingValue.trim() === '') {
       return null;
     }
-    
+
     try {
       const mapping = JSON.parse(mappingValue);
       if (typeof mapping !== 'object' || mapping === null) {
@@ -607,98 +670,102 @@ const EditChannel = (props) => {
   // 更新模型列表的统一方法
   const updateModelsList = (newModels, newMapping) => {
     const uniqueModels = Array.from(new Set(newModels.filter(model => model && model.trim())));
-    
-    setInputs((inputs) => ({ ...inputs, models: uniqueModels }));
-    setModelOriginalMapping(newMapping);
-  };
 
-  // 恢复模型到原始名称
-  const restoreModelsToOriginalNames = () => {
-    const currentModels = getCurrentModels();
-    const restoredModels = currentModels.map(model => modelOriginalMapping[model] || model);
-    
-    // 使用数组比较而不是JSON.stringify提高性能
-    const hasChanges = currentModels.length !== restoredModels.length || 
-      currentModels.some((model, index) => model !== restoredModels[index]);
-    
-    if (hasChanges) {
-      updateModelsList(restoredModels, {});
-    }
+    setInputs((prevInputs) => ({ ...prevInputs, models: uniqueModels }));
+    setModelOriginalMapping(newMapping);
   };
 
   // 应用模型映射的核心逻辑
   const applyModelMapping = (mapping, currentModels, currentMapping) => {
-    let updatedModels = [...currentModels];
-    let newMapping = { ...currentMapping };
+    if (!mapping || typeof mapping !== 'object') {
+      return { updatedModels: currentModels, newMapping: {}, hasChanges: false };
+    }
+
+    const updatedModels = new Set(currentModels);
+    const newMapping = Object.create(null);
     let hasChanges = false;
 
-    // 遍历重定向映射
-    Object.entries(mapping).forEach(([key, mappedValue]) => {
-      if (typeof key === 'string' && typeof mappedValue === 'string') {
-        const keyTrimmed = key.trim();
-        const valueTrimmed = mappedValue.trim();
+    // 处理新的映射关系
+    Object.entries(mapping).forEach(([displayName, originalName]) => {
+      const displayNameTrimmed = displayName.trim();
+      const originalNameTrimmed = originalName?.trim();
 
-        if (keyTrimmed && valueTrimmed) {
-          // 查找模型配置中是否存在重定向的"值"（原始模型名）
-          const valueIndex = updatedModels.findIndex(model => {
-            return model === valueTrimmed || newMapping[model] === valueTrimmed;
-          });
-
-          if (valueIndex !== -1) {
-            const currentDisplayName = updatedModels[valueIndex];
-            if (currentDisplayName !== keyTrimmed) {
-              // 记录原始映射关系
-              if (!newMapping[keyTrimmed]) {
-                newMapping[keyTrimmed] = newMapping[currentDisplayName] || currentDisplayName;
-              }
-              // 清理旧的映射关系
-              if (newMapping[currentDisplayName]) {
-                delete newMapping[currentDisplayName];
-              }
-              // 更新显示名称为重定向的键
-              updatedModels[valueIndex] = keyTrimmed;
-              hasChanges = true;
-            }
-          }
+      if (displayNameTrimmed && originalNameTrimmed) {
+        // 添加显示名称到模型列表中（如果不存在）
+        if (!updatedModels.has(displayNameTrimmed)) {
+          updatedModels.add(displayNameTrimmed);
+          hasChanges = true;
         }
+
+        // 建立映射关系：displayName -> originalName
+        newMapping[displayNameTrimmed] = originalNameTrimmed;
       }
     });
 
-    // 处理不在映射中的模型，恢复为原始名称
-    const mappingKeys = new Set(Object.keys(mapping).map(key => key.trim()));
-    updatedModels = updatedModels.map(model => {
-      if (!mappingKeys.has(model) && newMapping[model]) {
-        const originalName = newMapping[model];
-        delete newMapping[model];
-        hasChanges = true;
-        return originalName;
-      }
-      return model;
-    });
-
-    return { updatedModels, newMapping, hasChanges };
+    const result = {
+      updatedModels: Array.from(updatedModels),
+      newMapping,
+      hasChanges
+    };
+    return result;
   };
 
-  // 实时同步模型重定向到模型配置的函数
-  const syncModelMappingToModels = (mappingValue) => {
+  // 实时同步模型重定向到模型配置的函数（用于实时预览）
+  const syncModelMappingToModels = useCallback((mappingValue) => {
     const mapping = parseModelMapping(mappingValue);
-    
-    if (!mapping) {
-      restoreModelsToOriginalNames();
+
+    if (!mapping || Object.keys(mapping).length === 0) {
+      // 当映射为空时，恢复为原始名称
+      const currentModels = getCurrentModels();
+
+      // 模型列表为空，则不需要恢复
+      if (!currentModels || currentModels.length === 0) {
+        return;
+      }
+
+      // 没有映射关系，则不需要恢复
+      if (!modelOriginalMapping || Object.keys(modelOriginalMapping).length === 0) {
+        updateModelsList(currentModels, {});
+        return;
+      }
+
+      // 当删除映射时，需要将显示名称（key）替换为原始名称（value）
+      const restoredModels = currentModels.map(model => {
+        if (modelOriginalMapping[model]) {
+          return modelOriginalMapping[model];
+        }
+        return model;
+      });
+
+      // 去重
+      const uniqueRestoredModels = Array.from(new Set(restoredModels));
+
+      // 清空原始映射关系，因为已经恢复完成
+      updateModelsList(uniqueRestoredModels, {});
       return;
     }
 
     const currentModels = getCurrentModels();
+
+    // 在应用新映射之前，先恢复当前模型到原始名称
+    const restoredModels = currentModels.map(model => {
+      // 如果模型在原始映射中，恢复为原始名称
+      if (modelOriginalMapping[model]) {
+        return modelOriginalMapping[model];
+      }
+      return model;
+    });
     const { updatedModels, newMapping, hasChanges } = applyModelMapping(
-      mapping, 
-      currentModels, 
-      modelOriginalMapping
+      mapping,
+      restoredModels,
+      {}
     );
 
-    if (hasChanges) {
-      updateModelsList(updatedModels, newMapping);
+      if (hasChanges || JSON.stringify([...currentModels].sort()) !== JSON.stringify([...updatedModels].sort())) {
+        updateModelsList(updatedModels, newMapping);
     }
-  };
+  }, [modelOriginalMapping, inputs.models]);
+
 
   // Handle changes to the key list
   const updateKeyListToInput = (newKeyList) => {
@@ -760,10 +827,9 @@ const EditChannel = (props) => {
       return;
     }
 
-    // 处理模型重定向变更时自动同步模型配置（实时同步）
+    // 处理模型重定向变更时只更新状态，不触发实时同步
     if (name === 'model_mapping') {
       setInputs((inputs) => ({ ...inputs, [name]: value }));
-      syncModelMappingToModels(value);
       return;
     }
 
@@ -838,6 +904,7 @@ const EditChannel = (props) => {
       }
 
 
+      // 更新基础模型选项供参考，但不自动填充到 Select 组件
       let localModels = [];
       switch (value) {
         case 2:
@@ -877,9 +944,6 @@ const EditChannel = (props) => {
         default:
           localModels = getChannelModels(value);
           break;
-      }
-      if (inputs.models.length === 0 || inputs.type !== value) { // Only update models if type changes or models are empty
-        setInputs((inputs) => ({ ...inputs, models: localModels }));
       }
       setBasicModels(localModels);
     }
@@ -969,12 +1033,14 @@ const EditChannel = (props) => {
 
       // 初始化模型原始映射关系
       const mapping = parseModelMapping(data.model_mapping);
-      if (mapping) {
+      if (mapping && Object.keys(mapping).length > 0) {
         const initialMapping = {};
         // 根据当前的模型映射和模型列表，建立原始映射关系
-        Object.entries(mapping).forEach(([key, value]) => {
-          if (data.models.includes(key)) {
-            initialMapping[key] = value;
+        Object.entries(mapping).forEach(([displayName, originalName]) => {
+          const displayNameTrimmed = displayName.trim();
+          const originalNameTrimmed = originalName?.trim();
+          if (displayNameTrimmed && originalNameTrimmed && data.models.includes(displayNameTrimmed)) {
+            initialMapping[displayNameTrimmed] = originalNameTrimmed;
           }
         });
         setModelOriginalMapping(initialMapping);
@@ -1063,7 +1129,6 @@ const EditChannel = (props) => {
       setModelOriginalMapping({});
       let localModels = getChannelModels(originInputs.type); // Use originInputs.type for initial state
       setBasicModels(localModels);
-      setInputs((inputs) => ({ ...inputs, models: localModels }));
       setComponentResetKey(prev => prev + 1);
     }
   }, [props.editingChannel.id]);
@@ -1386,9 +1451,9 @@ const EditChannel = (props) => {
               {t('切换为单密钥模式')}
             </Button>
           </div>
-          
-          <div style={{ 
-            maxHeight: '50vh', 
+
+          <div style={{
+            maxHeight: '50vh',
             overflowY: 'auto',
             border: '1px solid var(--semi-color-border)',
             borderRadius: '6px',
@@ -1397,9 +1462,9 @@ const EditChannel = (props) => {
           }}>
             {keyList.map((key, index) => (
               <div key={index} style={{ display: 'flex', marginBottom: '5px', alignItems: 'center' }} className="key-input-item">
-                <Typography.Text 
-                  style={{ 
-                    minWidth: '30px', 
+                <Typography.Text
+                  style={{
+                    minWidth: '30px',
                     textAlign: 'center',
                     color: 'var(--semi-color-text-2)',
                     fontSize: 12,
@@ -1422,7 +1487,7 @@ const EditChannel = (props) => {
                   theme="borderless"
                   size="small"
                   onClick={() => copyKey(key)}
-                  style={{ 
+                  style={{
                     marginLeft: '4px',
                     minWidth: '28px',
                     opacity: key && key.trim() ? 1 : 0.3
@@ -1435,7 +1500,7 @@ const EditChannel = (props) => {
                   theme="borderless"
                   size="small"
                   onClick={() => removeKeyInput(index)}
-                  style={{ 
+                  style={{
                     marginLeft: '8px',
                     minWidth: '28px',
                     opacity: keyList.length <= 1 ? 0.3 : 1
@@ -1445,7 +1510,7 @@ const EditChannel = (props) => {
               </div>
             ))}
           </div>
-          
+
           <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Button
@@ -1470,7 +1535,7 @@ const EditChannel = (props) => {
               {t('总计: {{count}} 个密钥', { count: keyList.length })}
             </Typography.Text>
           </div>
-          
+
           <Typography.Text type="tertiary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
             {t('💡 提示: 输入逗号或回车可快速添加新密钥')}
           </Typography.Text>
@@ -1508,7 +1573,7 @@ const EditChannel = (props) => {
             </Button>
           )}
         </div>
-        
+
         <Input
           ref={singleKeyInputRef}
           name='key'
@@ -1581,7 +1646,7 @@ const EditChannel = (props) => {
             </Space>
           }
         />
-        
+
         {/* 清空按钮 */}
         {inputs.key && (
           <Button
@@ -1973,7 +2038,9 @@ const EditChannel = (props) => {
             filter
             searchPosition='dropdown'
             onChange={(value) => {
-              handleInputChange('models', value);
+              // 对模型列表进行去重处理（区分大小写）
+              const deduplicatedModels = [...new Set(value.filter(model => model && typeof model === 'string' && model.trim() !== ''))];
+              handleInputChange('models', deduplicatedModels);
             }}
             value={inputs.models}
             autoComplete='new-password'
@@ -2105,6 +2172,7 @@ const EditChannel = (props) => {
             key={`model-mapping-${componentResetKey}`}
             value={originalModelMapping || inputs.model_mapping}
             onChange={(value) => handleInputChange('model_mapping', value)}
+            onRealtimeChange={syncModelMappingToModels}
             placeholder={t('此项可选，用于修改请求体中的模型名称')}
           />
           <div style={{ marginTop: 8 }}>
