@@ -902,7 +902,7 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 func ClaudeTokenCountHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.OpenAIErrorWithStatusCode, *dto.Usage) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return service.OpenAIErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError), nil
+		return createTokenCountError("read_response_body_failed", "Failed to read response from Claude API", http.StatusInternalServerError), nil
 	}
 	resp.Body.Close()
 
@@ -910,23 +910,28 @@ func ClaudeTokenCountHandler(c *gin.Context, resp *http.Response, info *relaycom
 		println("token count responseBody: ", string(responseBody))
 	}
 
+	// Handle non-200 status codes with enhanced error handling
+	if resp.StatusCode != http.StatusOK {
+		return handleTokenCountErrorResponse(responseBody, resp.StatusCode), nil
+	}
+
 	// Parse Claude token count response
 	var claudeTokenResponse dto.TokenCountResponse
 	err = json.Unmarshal(responseBody, &claudeTokenResponse)
 	if err != nil {
-		// Try to parse as error response
+		// Try to parse as error response first
 		var claudeError dto.ClaudeResponse
 		if parseErr := json.Unmarshal(responseBody, &claudeError); parseErr == nil && claudeError.Error != nil {
-			return &dto.OpenAIErrorWithStatusCode{
-				Error: dto.OpenAIError{
-					Message: claudeError.Error.Message,
-					Type:    claudeError.Error.Type,
-					Code:    claudeError.Error.Type,
-				},
-				StatusCode: resp.StatusCode,
-			}, nil
+			return createTokenCountErrorFromClaude(claudeError.Error, resp.StatusCode), nil
 		}
-		return service.OpenAIErrorWrapper(err, "unmarshal_token_count_response_failed", http.StatusInternalServerError), nil
+		
+		// If neither parsing worked, return a generic error
+		return createTokenCountError("invalid_response_format", "Invalid response format from Claude API", http.StatusInternalServerError), nil
+	}
+
+	// Validate the response has the required field
+	if claudeTokenResponse.InputTokens < 0 {
+		return createTokenCountError("invalid_token_count", "Invalid token count received from Claude API", http.StatusInternalServerError), nil
 	}
 
 	// Return the response directly as Claude format (no conversion needed for token counting)
@@ -934,7 +939,7 @@ func ClaudeTokenCountHandler(c *gin.Context, resp *http.Response, info *relaycom
 	c.Writer.WriteHeader(http.StatusOK)
 	_, writeErr := c.Writer.Write(responseBody)
 	if writeErr != nil {
-		return service.OpenAIErrorWrapper(writeErr, "write_response_failed", http.StatusInternalServerError), nil
+		return createTokenCountError("write_response_failed", "Failed to write response to client", http.StatusInternalServerError), nil
 	}
 
 	// Return zero usage since token counting doesn't consume tokens
@@ -942,6 +947,49 @@ func ClaudeTokenCountHandler(c *gin.Context, resp *http.Response, info *relaycom
 		PromptTokens:     0,
 		CompletionTokens: 0,
 		TotalTokens:      0,
+	}
+}
+
+// handleTokenCountErrorResponse handles error responses from Claude API for token counting
+func handleTokenCountErrorResponse(responseBody []byte, statusCode int) *dto.OpenAIErrorWithStatusCode {
+	// Try to parse as Claude error response
+	var claudeError dto.ClaudeResponse
+	if err := json.Unmarshal(responseBody, &claudeError); err == nil && claudeError.Error != nil {
+		return createTokenCountErrorFromClaude(claudeError.Error, statusCode)
+	}
+
+	// Try to parse as generic error response
+	var genericError map[string]interface{}
+	if err := json.Unmarshal(responseBody, &genericError); err == nil {
+		if errorMsg, ok := genericError["error"].(map[string]interface{}); ok {
+			if message, msgOk := errorMsg["message"].(string); msgOk {
+				errorType := "api_error"
+				if typeVal, typeOk := errorMsg["type"].(string); typeOk {
+					errorType = typeVal
+				}
+				return createTokenCountError(errorType, message, statusCode)
+			}
+		}
+	}
+
+	// Fallback for unknown error format
+	return createTokenCountError("upstream_error", fmt.Sprintf("Token counting failed with status %d", statusCode), statusCode)
+}
+
+// createTokenCountErrorFromClaude creates a token count error from Claude error format
+func createTokenCountErrorFromClaude(claudeErr *dto.ClaudeError, statusCode int) *dto.OpenAIErrorWithStatusCode {
+	return createTokenCountError(claudeErr.Type, claudeErr.Message, statusCode)
+}
+
+// createTokenCountError creates a Claude API-formatted error for token counting (Requirement 6.2)
+func createTokenCountError(errorType, message string, statusCode int) *dto.OpenAIErrorWithStatusCode {
+	return &dto.OpenAIErrorWithStatusCode{
+		Error: dto.OpenAIError{
+			Type:    errorType,
+			Code:    errorType,
+			Message: message,
+		},
+		StatusCode: statusCode,
 	}
 }
 

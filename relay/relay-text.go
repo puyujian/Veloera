@@ -444,13 +444,14 @@ func TokenCountHelper(c *gin.Context) (openaiErr *dto.OpenAIErrorWithStatusCode)
 	textRequest, err := getAndValidateTokenCountRequest(c, relayInfo)
 	if err != nil {
 		common.LogError(c, fmt.Sprintf("getAndValidateTokenCountRequest failed: %s", err.Error()))
-		return service.OpenAIErrorWrapperLocal(err, "invalid_token_count_request", http.StatusBadRequest)
+		// Return Claude API-formatted error for validation failures (Requirement 6.2)
+		return createTokenCountValidationError(err.Error())
 	}
 
 	// Apply model mapping
 	err = helper.ModelMappedHelper(c, relayInfo)
 	if err != nil {
-		return service.OpenAIErrorWrapperLocal(err, "model_mapped_error", http.StatusInternalServerError)
+		return createTokenCountValidationError(fmt.Sprintf("Model mapping failed: %s", err.Error()))
 	}
 
 	textRequest.Model = relayInfo.UpstreamModelName
@@ -458,14 +459,14 @@ func TokenCountHelper(c *gin.Context) (openaiErr *dto.OpenAIErrorWithStatusCode)
 	// Get adaptor for the channel
 	adaptor := GetAdaptor(relayInfo.ApiType)
 	if adaptor == nil {
-		return service.OpenAIErrorWrapperLocal(fmt.Errorf("invalid api type: %d", relayInfo.ApiType), "invalid_api_type", http.StatusBadRequest)
+		return createTokenCountValidationError(fmt.Sprintf("Unsupported channel type for model '%s'", relayInfo.OriginModelName))
 	}
 	adaptor.Init(relayInfo)
 
 	// Convert request to channel-specific format
 	convertedRequest, err := adaptor.ConvertOpenAIRequest(c, relayInfo, textRequest)
 	if err != nil {
-		return service.OpenAIErrorWrapperLocal(err, "convert_request_failed", http.StatusInternalServerError)
+		return createTokenCountValidationError(fmt.Sprintf("Request conversion failed: %s", err.Error()))
 	}
 
 	jsonData, err := json.Marshal(convertedRequest)
@@ -482,6 +483,10 @@ func TokenCountHelper(c *gin.Context) (openaiErr *dto.OpenAIErrorWithStatusCode)
 	// Make request to upstream
 	resp, err := adaptor.DoRequest(c, relayInfo, requestBody)
 	if err != nil {
+		// Enhanced error handling for upstream request failures
+		if strings.Contains(err.Error(), "connection") || strings.Contains(err.Error(), "timeout") {
+			return createTokenCountServiceError("Service temporarily unavailable. Please try again later.")
+		}
 		return service.OpenAIErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
 	}
 
@@ -513,6 +518,30 @@ func TokenCountHelper(c *gin.Context) (openaiErr *dto.OpenAIErrorWithStatusCode)
 	return nil
 }
 
+// createTokenCountValidationError creates a Claude API-formatted validation error
+func createTokenCountValidationError(message string) *dto.OpenAIErrorWithStatusCode {
+	return &dto.OpenAIErrorWithStatusCode{
+		Error: dto.OpenAIError{
+			Type:    "invalid_request_error",
+			Code:    "invalid_request_error",
+			Message: message,
+		},
+		StatusCode: http.StatusBadRequest,
+	}
+}
+
+// createTokenCountServiceError creates a Claude API-formatted service error
+func createTokenCountServiceError(message string) *dto.OpenAIErrorWithStatusCode {
+	return &dto.OpenAIErrorWithStatusCode{
+		Error: dto.OpenAIError{
+			Type:    "api_error",
+			Code:    "api_error", 
+			Message: message,
+		},
+		StatusCode: http.StatusServiceUnavailable,
+	}
+}
+
 func getAndValidateTokenCountRequest(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
 	textRequest := &dto.GeneralOpenAIRequest{}
 	err := common.UnmarshalBodyReusable(c, textRequest)
@@ -535,6 +564,12 @@ func getAndValidateTokenCountRequest(c *gin.Context, relayInfo *relaycommon.Rela
 		return nil, errors.New("field messages is required")
 	}
 
+	// Validate message content for unsupported media types (Requirement 3.4)
+	err = validateTokenCountMessageContent(textRequest.Messages)
+	if err != nil {
+		return nil, err
+	}
+
 	// Token counting is never streaming
 	relayInfo.IsStream = false
 	textRequest.Stream = false
@@ -543,6 +578,40 @@ func getAndValidateTokenCountRequest(c *gin.Context, relayInfo *relaycommon.Rela
 	relayInfo.PromptMessages = textRequest.Messages
 
 	return textRequest, nil
+}
+
+// validateTokenCountMessageContent validates that message content types are supported for token counting
+func validateTokenCountMessageContent(messages []dto.Message) error {
+	for i, message := range messages {
+		// Use the existing ParseContent method to get media content
+		contentArray := message.ParseContent()
+		if len(contentArray) > 0 {
+			// This is a content array, validate each content block
+			for j, content := range contentArray {
+				if content.Type != "text" && content.Type != "image" {
+					// Claude supports text and image content for token counting
+					// Other types like audio, video, etc. are not supported
+					return fmt.Errorf("unsupported media type '%s' in message %d, content block %d. Token counting supports text and image content only", 
+						content.Type, i+1, j+1)
+				}
+				
+				// Additional validation for image content
+				if content.Type == "image" {
+					imageMedia := content.GetImageMedia()
+					if imageMedia == nil {
+						return fmt.Errorf("image content in message %d, content block %d is missing image information", i+1, j+1)
+					}
+					// Note: Claude API handles various image formats, so we don't need to restrict to base64 only
+				}
+				
+				// Additional validation for unsupported audio content
+				if content.Type == "input_audio" {
+					return fmt.Errorf("audio content is not supported for token counting in message %d, content block %d", i+1, j+1)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,

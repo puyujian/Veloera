@@ -497,7 +497,12 @@ func RelayTokenCount(c *gin.Context) {
 		channel, err := getChannel(c, group, originalModel, retryIndex)
 		if err != nil {
 			common.LogError(c, err.Error())
-			openaiErr = service.OpenAIErrorWrapperLocal(err, "get_channel_failed", http.StatusInternalServerError)
+			// Enhanced error handling for channel availability (Requirement 4.3)
+			if strings.Contains(err.Error(), "获取重试渠道失败") || strings.Contains(err.Error(), "no available channel") {
+				openaiErr = createTokenCountChannelError(originalModel, group)
+			} else {
+				openaiErr = service.OpenAIErrorWrapperLocal(err, "get_channel_failed", http.StatusInternalServerError)
+			}
 			break
 		}
 
@@ -540,9 +545,27 @@ func RelayTokenCount(c *gin.Context) {
 			openaiErr.Error.Message = "当前分组上游负载已饱和，请稍后再试"
 		}
 		openaiErr.Error.Message = common.MessageWithRequestId(openaiErr.Error.Message, requestId)
+		
+		// Return error in Claude API format for token counting (Requirement 6.2)
 		c.JSON(openaiErr.StatusCode, gin.H{
-			"error": openaiErr.Error,
+			"type":  "error",
+			"error": gin.H{
+				"type":    openaiErr.Error.Type,
+				"message": openaiErr.Error.Message,
+			},
 		})
+	}
+}
+
+// createTokenCountChannelError creates a Claude-formatted error for channel availability issues
+func createTokenCountChannelError(model, group string) *dto.OpenAIErrorWithStatusCode {
+	return &dto.OpenAIErrorWithStatusCode{
+		Error: dto.OpenAIError{
+			Type:    "invalid_request_error",
+			Code:    "no_available_channel",
+			Message: fmt.Sprintf("No available channels found for model '%s' in group '%s'. Please check your channel configuration or try again later.", model, group),
+		},
+		StatusCode: http.StatusServiceUnavailable,
 	}
 }
 
