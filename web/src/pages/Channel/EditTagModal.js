@@ -32,20 +32,20 @@ import {
   Input,
   Typography,
   Spin,
-  Modal,
   Select,
   Banner,
-  TextArea,
 } from '@douyinfe/semi-ui';
 import TextInput from '../../components/custom/TextInput.js';
 import { getChannelModels } from '../../components/utils.js';
+import ModelMappingEditor from '../../components/shared/ModelMappingEditor.js';
+import { useModelMapping } from '../../hooks/useModelMapping.js';
+import { useTranslation } from 'react-i18next';
 
-const MODEL_MAPPING_EXAMPLE = {
-  'gpt-3.5-turbo': 'gpt-3.5-turbo-0125',
-};
+
 
 const EditTagModal = (props) => {
   const { visible, tag, handleClose, refresh } = props;
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [originModelOptions, setOriginModelOptions] = useState([]);
   const [modelOptions, setModelOptions] = useState([]);
@@ -62,7 +62,30 @@ const EditTagModal = (props) => {
   };
   const [inputs, setInputs] = useState(originInputs);
 
+  // 使用模型映射 Hook
+  const {
+    syncModelMappingToModels,
+    resetModelMapping
+  } = useModelMapping();
+
+  // 更新模型列表的回调函数
+  const updateModelsCallback = React.useCallback((newModels) => {
+    setInputs((prevInputs) => ({ ...prevInputs, models: newModels }));
+  }, []);
+
+  // 包装后的同步函数，传入当前模型和更新回调
+  const handleSyncModelMapping = React.useCallback((mappingValue) => {
+    const currentModels = inputs.models || [];
+    syncModelMappingToModels(mappingValue, currentModels, updateModelsCallback);
+  }, [syncModelMappingToModels, updateModelsCallback, inputs.models]);
+
   const handleInputChange = (name, value) => {
+    // 处理模型重定向变更时只更新状态，不触发实时同步
+    if (name === 'model_mapping') {
+      setInputs((inputs) => ({ ...inputs, [name]: value }));
+      return;
+    }
+
     setInputs((inputs) => ({ ...inputs, [name]: value }));
     if (name === 'type') {
       let localModels = [];
@@ -217,9 +240,18 @@ const EditTagModal = (props) => {
       tag: tag,
       new_tag: tag,
     });
+    // 重置模型映射状态
+    resetModelMapping();
     fetchModels().then();
     fetchGroups().then();
-  }, [visible]);
+  }, [visible, resetModelMapping]);
+
+  // 在组件卸载时清理资源
+  useEffect(() => {
+    return () => {
+      resetModelMapping();
+    };
+  }, [resetModelMapping]);
 
   const addCustomModels = () => {
     if (customModel.trim() === '') return;
@@ -239,6 +271,7 @@ const EditTagModal = (props) => {
           key: model,
           text: model,
           value: model,
+          label: model,
         });
       } else if (model) {
         showError('某些模型已存在！');
@@ -301,6 +334,35 @@ const EditTagModal = (props) => {
           value={inputs.models}
           autoComplete='new-password'
           optionList={modelOptions}
+          renderSelectedItem={(optionNode) => {
+            const modelName = String(optionNode?.value ?? '');
+
+            const handleCopy = async (e) => {
+              e.stopPropagation();
+              try {
+                await navigator.clipboard.writeText(modelName);
+                showSuccess(t('已复制：{{name}}', { name: modelName }));
+              } catch (error) {
+                console.error('Failed to copy to clipboard:', error);
+                showError(t('复制失败'));
+              }
+            };
+
+            return {
+              isRenderInTag: true,
+              content: (
+                <span
+                  className="cursor-pointer select-none"
+                  role="button"
+                  tabIndex={0}
+                  title={t('点击复制模型名称')}
+                  onClick={handleCopy}
+                >
+                  {optionNode.label || modelName}
+                </span>
+              ),
+            };
+          }}
         />
         <Input
           addonAfter={
@@ -335,57 +397,44 @@ const EditTagModal = (props) => {
         <div style={{ marginTop: 10 }}>
           <Typography.Text strong>模型重定向：</Typography.Text>
         </div>
-        <TextArea
-          placeholder={`此项可选，用于修改请求体中的模型名称，为一个 JSON 字符串，键为请求中模型名称，值为要替换的模型名称，留空则不更改`}
-          name='model_mapping'
-          onChange={(value) => {
-            handleInputChange('model_mapping', value);
-          }}
-          autosize
-          value={inputs.model_mapping}
-          autoComplete='new-password'
+        <ModelMappingEditor
+          value={inputs.model_mapping || ''}
+          onChange={(value) => handleInputChange('model_mapping', value)}
+          onRealtimeChange={handleSyncModelMapping}
+          placeholder="此项可选，用于修改请求体中的模型名称，留空则不更改"
         />
-        <Space>
-          <Typography.Text
-            style={{
-              color: 'rgba(var(--semi-blue-5), 1)',
-              userSelect: 'none',
-              cursor: 'pointer',
-            }}
-            onClick={() => {
-              handleInputChange(
-                'model_mapping',
-                JSON.stringify(MODEL_MAPPING_EXAMPLE, null, 2),
-              );
-            }}
-          >
-            填入模板
-          </Typography.Text>
-          <Typography.Text
-            style={{
-              color: 'rgba(var(--semi-blue-5), 1)',
-              userSelect: 'none',
-              cursor: 'pointer',
-            }}
-            onClick={() => {
-              handleInputChange('model_mapping', JSON.stringify({}, null, 2));
-            }}
-          >
-            清空重定向
-          </Typography.Text>
-          <Typography.Text
-            style={{
-              color: 'rgba(var(--semi-blue-5), 1)',
-              userSelect: 'none',
-              cursor: 'pointer',
-            }}
-            onClick={() => {
-              handleInputChange('model_mapping', '');
-            }}
-          >
-            不更改
-          </Typography.Text>
-        </Space>
+        <div style={{ marginTop: 8 }}>
+          <Space>
+            <Typography.Text
+              style={{
+                color: 'rgba(var(--semi-blue-5), 1)',
+                userSelect: 'none',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                handleInputChange('model_mapping', JSON.stringify({}, null, 2));
+                // 重置模型映射状态
+                resetModelMapping();
+              }}
+            >
+              清空重定向
+            </Typography.Text>
+            <Typography.Text
+              style={{
+                color: 'rgba(var(--semi-blue-5), 1)',
+                userSelect: 'none',
+                cursor: 'pointer',
+              }}
+              onClick={() => {
+                handleInputChange('model_mapping', '');
+                // 重置模型映射状态
+                resetModelMapping();
+              }}
+            >
+              不更改
+            </Typography.Text>
+          </Space>
+        </div>
       </Spin>
     </SideSheet>
   );

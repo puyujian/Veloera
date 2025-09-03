@@ -48,6 +48,8 @@ import {
   Col,
 } from '@douyinfe/semi-ui';
 import { getChannelModels, loadChannelModels } from '../../components/utils.js';
+import ModelMappingEditor from '../../components/shared/ModelMappingEditor.js';
+import { useModelMapping } from '../../hooks/useModelMapping.js';
 import {
   IconEyeOpened,
   IconEyeClosedSolid,
@@ -234,321 +236,7 @@ const ModelSelector = ({ channelId, type, apiKey, baseUrl, isEdit, selectedModel
   );
 };
 
-const MODEL_MAPPING_EXAMPLE = {
-  'gpt-3.5-turbo': 'gpt-3.5-turbo-0125',
-};
 
-// ModelMappingEditor component for visual key-value editing
-const ModelMappingEditor = ({ value, onChange, placeholder, onRealtimeChange }) => {
-  const { t } = useTranslation();
-  const [mappingPairs, setMappingPairs] = useState([]);
-  const [mode, setMode] = useState('visual'); // 'visual' or 'json'
-  const [jsonValue, setJsonValue] = useState('');
-  const [jsonError, setJsonError] = useState('');
-
-  // 用于标记是否是内部更新，避免循环更新
-  const isInternalUpdateRef = useRef(false);
-
-  // Parse JSON value to key-value pairs
-  const parseJsonToMappings = (jsonStr) => {
-    if (!jsonStr || jsonStr.trim() === '') {
-      return [];
-    }
-    try {
-      const parsed = JSON.parse(jsonStr);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
-        return Object.entries(parsed)
-          .filter(([k]) => !unsafe.has(k))
-          .map(([key, value]) => ({
-          id: Date.now() + Math.random(),
-          key,
-          value
-        }));
-      }
-      return [];
-    } catch {
-      return [];
-    }
-  };
-
-  // Convert key-value pairs to JSON string
-  const mappingsToJson = (pairs) => {
-    if (!pairs || pairs.length === 0) {
-      return '';
-    }
-    const obj = Object.create(null);
-    const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
-    pairs.forEach(pair => {
-      if (pair.key && pair.key.trim() !== '') {
-        const k = pair.key.trim();
-        if (!unsafe.has(k)) obj[k] = pair.value || '';
-      }
-    });
-    return Object.keys(obj).length > 0 ? JSON.stringify(obj, null, 2) : '';
-  };
-
-  // Initialize component state from value prop
-  useEffect(() => {
-    // 只有在非内部更新时才同步外部状态
-    if (!isInternalUpdateRef.current) {
-      const pairs = parseJsonToMappings(value);
-      setMappingPairs(pairs.length > 0 ? pairs : [{ id: Date.now() + Math.random(), key: '', value: '' }]);
-      setJsonValue(value || '');
-      setJsonError('');
-    }
-    isInternalUpdateRef.current = false;
-  }, [value]);
-
-  // Add new mapping pair
-  const addMappingPair = () => {
-    const newPairs = [...mappingPairs, { id: Date.now() + Math.random(), key: '', value: '' }];
-    setMappingPairs(newPairs);
-  };
-
-  // Remove mapping pair
-  const removeMappingPair = (index) => {
-    const newPairs = mappingPairs.filter((_, i) => i !== index);
-    const finalPairs = newPairs.length > 0 ? newPairs : [{ id: Date.now() + Math.random(), key: '', value: '' }];
-    setMappingPairs(finalPairs);
-
-    // 立即更新父组件
-    const jsonStr = mappingsToJson(finalPairs);
-    isInternalUpdateRef.current = true;
-    onChange(jsonStr);
-
-    // 触发实时同步
-    if (onRealtimeChange) {
-      onRealtimeChange(jsonStr);
-    }
-  };
-
-  // Update mapping pair - 只更新本地状态，不触发父组件更新
-  const updateMappingPair = (index, field, value) => {
-    const newPairs = [...mappingPairs];
-    newPairs[index] = { ...newPairs[index], [field]: value };
-    setMappingPairs(newPairs);
-
-    // 触发实时同步回调，但不更新父组件的 model_mapping 状态
-    if (onRealtimeChange) {
-      const jsonStr = mappingsToJson(newPairs);
-      onRealtimeChange(jsonStr);
-    }
-  };
-
-  // 在失去焦点时同步到父组件
-  const handleInputBlur = () => {
-    const jsonStr = mappingsToJson(mappingPairs);
-    isInternalUpdateRef.current = true;
-    onChange(jsonStr);
-  };
-
-  // Handle mode switch
-  const switchMode = (newMode) => {
-    if (newMode === 'json' && mode === 'visual') {
-      // Switching from visual to JSON
-      const jsonStr = mappingsToJson(mappingPairs);
-      setJsonValue(jsonStr);
-      setJsonError('');
-    } else if (newMode === 'visual' && mode === 'json') {
-      // Switching from JSON to visual
-      try {
-        if (jsonValue.trim() === '') {
-          setMappingPairs([{ id: Date.now() + Math.random(), key: '', value: '' }]);
-          setJsonError('');
-        } else {
-          const parsed = JSON.parse(jsonValue);
-          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            const unsafe = new Set(['__proto__', 'prototype', 'constructor']);
-              const pairs = Object.entries(parsed)
-                .filter(([k]) => !unsafe.has(k))
-                .map(([key, value]) => ({
-                id: Date.now() + Math.random(),
-                key,
-                value
-            }));
-            setMappingPairs(pairs.length > 0 ? pairs : [{ id: Date.now() + Math.random(), key: '', value: '' }]);
-            setJsonError('');
-          } else {
-            setJsonError(t('请输入有效的JSON对象格式'));
-            return;
-          }
-        }
-      } catch (error) {
-        setJsonError(t('JSON格式错误: {{message}}', { message: error.message }));
-        return;
-      }
-    }
-    setMode(newMode);
-  };
-
-  // Handle JSON input change
-  const handleJsonChange = (newValue) => {
-    setJsonValue(newValue);
-
-    // Validate JSON
-    if (newValue.trim() === '') {
-      setJsonError('');
-      // 触发实时同步
-      if (onRealtimeChange) {
-        onRealtimeChange('');
-      }
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(newValue);
-      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-        setJsonError('');
-        // 触发实时同步
-        if (onRealtimeChange) {
-          onRealtimeChange(newValue);
-        }
-      } else {
-        setJsonError(t('请输入有效的JSON对象格式'));
-      }
-    } catch (error) {
-      setJsonError(t('JSON格式错误: {{message}}', { message: error.message }));
-    }
-  };
-
-  // 在 JSON 模式失去焦点时同步到父组件
-  const handleJsonBlur = () => {
-    if (!jsonError && jsonValue.trim() !== '') {
-      try {
-        const parsed = JSON.parse(jsonValue);
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-          isInternalUpdateRef.current = true;
-          onChange(jsonValue);
-        }
-      } catch (error) {
-        // 忽略错误，不更新父组件
-      }
-    } else if (jsonValue.trim() === '') {
-      isInternalUpdateRef.current = true;
-      onChange('');
-    }
-  };
-
-  // Fill template
-  const fillTemplate = () => {
-    const templateJson = JSON.stringify(MODEL_MAPPING_EXAMPLE, null, 2);
-    if (mode === 'visual') {
-      const pairs = parseJsonToMappings(templateJson);
-      setMappingPairs(pairs);
-    } else {
-      setJsonValue(templateJson);
-    }
-
-    // 立即更新父组件和触发实时同步
-    isInternalUpdateRef.current = true;
-    onChange(templateJson);
-    if (onRealtimeChange) {
-      onRealtimeChange(templateJson);
-    }
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-        <div style={{ display: 'flex', marginRight: 16 }}>
-          <Button
-            type={mode === 'visual' ? 'primary' : 'tertiary'}
-            onClick={() => switchMode('visual')}
-            style={{
-              borderRadius: '6px 0 0 6px'
-            }}
-          >
-            {t('可视化编辑')}
-          </Button>
-          <Button
-            type={mode === 'json' ? 'primary' : 'tertiary'}
-            onClick={() => switchMode('json')}
-            style={{
-              borderRadius: '0 6px 6px 0'
-            }}
-          >
-            {t('JSON编辑')}
-          </Button>
-        </div>
-        <Typography.Text
-          style={{
-            color: 'rgba(var(--semi-blue-5), 1)',
-            userSelect: 'none',
-            cursor: 'pointer',
-          }}
-          onClick={fillTemplate}
-        >
-          {t('填入模板')}
-        </Typography.Text>
-      </div>
-
-      {mode === 'visual' ? (
-        <div>
-          <div style={{ marginBottom: 10 }}>
-            <Typography.Text type="secondary">{placeholder}</Typography.Text>
-          </div>
-
-          {mappingPairs.map((pair, index) => (
-            <div key={pair.id} style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-              <Input
-                placeholder={t('目标模型名称')}
-                value={pair.key}
-                onChange={(value) => updateMappingPair(index, 'key', value)}
-                onBlur={() => handleInputBlur(index, 'key')}
-                style={{ flex: 1, marginRight: 8 }}
-              />
-              <Typography.Text style={{ margin: '0 8px' }}>→</Typography.Text>
-              <Input
-                placeholder={t('实际模型名称')}
-                value={pair.value}
-                onChange={(value) => updateMappingPair(index, 'value', value)}
-                onBlur={() => handleInputBlur(index, 'value')}
-                style={{ flex: 1, marginRight: 8 }}
-              />
-              <Button
-                type="danger"
-                icon={<IconMinusCircle />}
-                size="small"
-                onClick={() => removeMappingPair(index)}
-                style={{ marginLeft: 4 }}
-              />
-            </div>
-          ))}
-
-          <Button
-            type="tertiary"
-            icon={<IconPlusCircle />}
-            onClick={addMappingPair}
-            style={{ width: '100%', marginTop: 8 }}
-          >
-            {t('添加映射')}
-          </Button>
-        </div>
-      ) : (
-        <div>
-          <TextArea
-            placeholder={
-              t(
-                '此项可选，用于修改请求体中的模型名称，为一个 JSON 字符串，键为请求中模型名称，值为要替换的模型名称，例如：',
-              ) + `\n${JSON.stringify(MODEL_MAPPING_EXAMPLE, null, 2)}`
-            }
-            value={jsonValue}
-            onChange={handleJsonChange}
-            onBlur={handleJsonBlur}
-            autosize
-            autoComplete='new-password'
-          />
-          {jsonError && (
-            <Typography.Text type="danger" style={{ marginTop: 4, display: 'block' }}>
-              {jsonError}
-            </Typography.Text>
-          )}
-        </div>
-      )}
-    </div>
-  );
-};
 
 const STATUS_CODE_MAPPING_EXAMPLE = {
   400: '500',
@@ -641,130 +329,28 @@ const EditChannel = (props) => {
   const [fullModels, setFullModels] = useState([]);
   const [customModel, setCustomModel] = useState('');
 
-  // 用于追踪模型的原始名称映射关系 { displayName: originalName }
-  const [modelOriginalMapping, setModelOriginalMapping] = useState({});
-
-  // 解析模型映射配置的工具函数
-  const parseModelMapping = (mappingValue) => {
-    if (!mappingValue || typeof mappingValue !== 'string' || mappingValue.trim() === '') {
-      return null;
-    }
-
-    try {
-      const mapping = JSON.parse(mappingValue);
-      if (typeof mapping !== 'object' || mapping === null) {
-        return null;
-      }
-      return mapping;
-    } catch (error) {
-      console.warn('模型重定向 JSON 解析失败:', error);
-      return null;
-    }
-  };
+  // 使用模型映射 Hook
+  const {
+    syncModelMappingToModels,
+    initializeModelMapping,
+    resetModelMapping
+  } = useModelMapping();
 
   // 获取当前模型列表的工具函数
   const getCurrentModels = () => {
     return inputs.models || [];
   };
 
-  // 更新模型列表的统一方法
-  const updateModelsList = (newModels, newMapping) => {
-    const uniqueModels = Array.from(new Set(newModels.filter(model => model && model.trim())));
+  // 更新模型列表的回调函数
+  const updateModelsCallback = useCallback((newModels) => {
+    setInputs((prevInputs) => ({ ...prevInputs, models: newModels }));
+  }, []);
 
-    setInputs((prevInputs) => ({ ...prevInputs, models: uniqueModels }));
-    setModelOriginalMapping(newMapping);
-  };
-
-  // 应用模型映射的核心逻辑
-  const applyModelMapping = (mapping, currentModels, currentMapping) => {
-    if (!mapping || typeof mapping !== 'object') {
-      return { updatedModels: currentModels, newMapping: {}, hasChanges: false };
-    }
-
-    const updatedModels = new Set(currentModels);
-    const newMapping = Object.create(null);
-    let hasChanges = false;
-
-    // 处理新的映射关系
-    Object.entries(mapping).forEach(([displayName, originalName]) => {
-      const displayNameTrimmed = displayName.trim();
-      const originalNameTrimmed = originalName?.trim();
-
-      if (displayNameTrimmed && originalNameTrimmed) {
-        // 添加显示名称到模型列表中（如果不存在）
-        if (!updatedModels.has(displayNameTrimmed)) {
-          updatedModels.add(displayNameTrimmed);
-          hasChanges = true;
-        }
-
-        // 建立映射关系：displayName -> originalName
-        newMapping[displayNameTrimmed] = originalNameTrimmed;
-      }
-    });
-
-    const result = {
-      updatedModels: Array.from(updatedModels),
-      newMapping,
-      hasChanges
-    };
-    return result;
-  };
-
-  // 实时同步模型重定向到模型配置的函数（用于实时预览）
-  const syncModelMappingToModels = useCallback((mappingValue) => {
-    const mapping = parseModelMapping(mappingValue);
-
-    if (!mapping || Object.keys(mapping).length === 0) {
-      // 当映射为空时，恢复为原始名称
-      const currentModels = getCurrentModels();
-
-      // 模型列表为空，则不需要恢复
-      if (!currentModels || currentModels.length === 0) {
-        return;
-      }
-
-      // 没有映射关系，则不需要恢复
-      if (!modelOriginalMapping || Object.keys(modelOriginalMapping).length === 0) {
-        updateModelsList(currentModels, {});
-        return;
-      }
-
-      // 当删除映射时，需要将显示名称（key）替换为原始名称（value）
-      const restoredModels = currentModels.map(model => {
-        if (modelOriginalMapping[model]) {
-          return modelOriginalMapping[model];
-        }
-        return model;
-      });
-
-      // 去重
-      const uniqueRestoredModels = Array.from(new Set(restoredModels));
-
-      // 清空原始映射关系，因为已经恢复完成
-      updateModelsList(uniqueRestoredModels, {});
-      return;
-    }
-
+  // 包装后的同步函数，传入当前模型和更新回调
+  const handleSyncModelMapping = useCallback((mappingValue) => {
     const currentModels = getCurrentModels();
-
-    // 在应用新映射之前，先恢复当前模型到原始名称
-    const restoredModels = currentModels.map(model => {
-      // 如果模型在原始映射中，恢复为原始名称
-      if (modelOriginalMapping[model]) {
-        return modelOriginalMapping[model];
-      }
-      return model;
-    });
-    const { updatedModels, newMapping, hasChanges } = applyModelMapping(
-      mapping,
-      restoredModels,
-      {}
-    );
-
-      if (hasChanges || JSON.stringify([...currentModels].sort()) !== JSON.stringify([...updatedModels].sort())) {
-        updateModelsList(updatedModels, newMapping);
-    }
-  }, [modelOriginalMapping, inputs.models]);
+    syncModelMappingToModels(mappingValue, currentModels, updateModelsCallback);
+  }, [syncModelMappingToModels, updateModelsCallback, inputs.models]);
 
 
   // Handle changes to the key list
@@ -1032,21 +618,7 @@ const EditChannel = (props) => {
       setOriginalModelMapping(data.model_mapping);
 
       // 初始化模型原始映射关系
-      const mapping = parseModelMapping(data.model_mapping);
-      if (mapping && Object.keys(mapping).length > 0) {
-        const initialMapping = {};
-        // 根据当前的模型映射和模型列表，建立原始映射关系
-        Object.entries(mapping).forEach(([displayName, originalName]) => {
-          const displayNameTrimmed = displayName.trim();
-          const originalNameTrimmed = originalName?.trim();
-          if (displayNameTrimmed && originalNameTrimmed && data.models.includes(displayNameTrimmed)) {
-            initialMapping[displayNameTrimmed] = originalNameTrimmed;
-          }
-        });
-        setModelOriginalMapping(initialMapping);
-      } else {
-        setModelOriginalMapping({});
-      }
+      initializeModelMapping(data.model_mapping, data.models);
 
       setInputs(data);
       if (data.auto_ban === 0) {
@@ -1126,7 +698,7 @@ const EditChannel = (props) => {
       setInputs(originInputs);
       setOriginalModelMapping(''); // Initialize as an empty string
       // 重置模型原始映射关系
-      setModelOriginalMapping({});
+      resetModelMapping();
       let localModels = getChannelModels(originInputs.type); // Use originInputs.type for initial state
       setBasicModels(localModels);
       setComponentResetKey(prev => prev + 1);
@@ -1143,9 +715,9 @@ const EditChannel = (props) => {
   // 在组件卸载时清理资源
   useEffect(() => {
     return () => {
-      setModelOriginalMapping({});
+      resetModelMapping();
     };
-  }, []);
+  }, [resetModelMapping]);
 
 
   const submit = async () => {
@@ -2172,7 +1744,7 @@ const EditChannel = (props) => {
             key={`model-mapping-${componentResetKey}`}
             value={originalModelMapping || inputs.model_mapping}
             onChange={(value) => handleInputChange('model_mapping', value)}
-            onRealtimeChange={syncModelMappingToModels}
+            onRealtimeChange={handleSyncModelMapping}
             placeholder={t('此项可选，用于修改请求体中的模型名称')}
           />
           <div style={{ marginTop: 8 }}>
