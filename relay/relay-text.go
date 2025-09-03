@@ -437,6 +437,114 @@ func returnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 }
 
+func TokenCountHelper(c *gin.Context) (openaiErr *dto.OpenAIErrorWithStatusCode) {
+	relayInfo := relaycommon.GenRelayInfo(c)
+
+	// get & validate textRequest for token counting
+	textRequest, err := getAndValidateTokenCountRequest(c, relayInfo)
+	if err != nil {
+		common.LogError(c, fmt.Sprintf("getAndValidateTokenCountRequest failed: %s", err.Error()))
+		return service.OpenAIErrorWrapperLocal(err, "invalid_token_count_request", http.StatusBadRequest)
+	}
+
+	// Apply model mapping
+	err = helper.ModelMappedHelper(c, relayInfo)
+	if err != nil {
+		return service.OpenAIErrorWrapperLocal(err, "model_mapped_error", http.StatusInternalServerError)
+	}
+
+	textRequest.Model = relayInfo.UpstreamModelName
+
+	// Get adaptor for the channel
+	adaptor := GetAdaptor(relayInfo.ApiType)
+	if adaptor == nil {
+		return service.OpenAIErrorWrapperLocal(fmt.Errorf("invalid api type: %d", relayInfo.ApiType), "invalid_api_type", http.StatusBadRequest)
+	}
+	adaptor.Init(relayInfo)
+
+	// Convert request to channel-specific format
+	convertedRequest, err := adaptor.ConvertOpenAIRequest(c, relayInfo, textRequest)
+	if err != nil {
+		return service.OpenAIErrorWrapperLocal(err, "convert_request_failed", http.StatusInternalServerError)
+	}
+
+	jsonData, err := json.Marshal(convertedRequest)
+	if err != nil {
+		return service.OpenAIErrorWrapperLocal(err, "json_marshal_failed", http.StatusInternalServerError)
+	}
+
+	if common.DebugEnabled {
+		println("token count requestBody: ", string(jsonData))
+	}
+
+	requestBody := bytes.NewBuffer(jsonData)
+
+	// Make request to upstream
+	resp, err := adaptor.DoRequest(c, relayInfo, requestBody)
+	if err != nil {
+		return service.OpenAIErrorWrapper(err, "do_request_failed", http.StatusInternalServerError)
+	}
+
+	statusCodeMappingStr := c.GetString("status_code_mapping")
+
+	if resp != nil {
+		httpResp := resp.(*http.Response)
+		if httpResp.StatusCode != http.StatusOK {
+			openaiErr = service.RelayErrorHandler(httpResp, false)
+			// reset status code
+			service.ResetStatusCode(openaiErr, statusCodeMappingStr)
+			return openaiErr
+		}
+
+		// Handle response - this will write directly to the client
+		_, openaiErr = adaptor.DoResponse(c, httpResp, relayInfo)
+		if openaiErr != nil {
+			// reset status code
+			service.ResetStatusCode(openaiErr, statusCodeMappingStr)
+			return openaiErr
+		}
+
+		// Mark response as written
+		c.Set("response_written", true)
+	}
+
+	// No usage tracking for token counting - this is the key requirement
+	// Token counting requests should not consume user quotas or be logged as billable usage
+	return nil
+}
+
+func getAndValidateTokenCountRequest(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*dto.GeneralOpenAIRequest, error) {
+	textRequest := &dto.GeneralOpenAIRequest{}
+	err := common.UnmarshalBodyReusable(c, textRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	if textRequest.Model == "" {
+		return nil, errors.New("model is required")
+	}
+
+	// Validate that the model supports token counting
+	if !dto.IsTokenCountSupportedModel(textRequest.Model) {
+		return nil, fmt.Errorf("model '%s' does not support token counting. Supported models: %s", 
+			textRequest.Model, strings.Join(dto.TokenCountSupportedModels, ", "))
+	}
+
+	// For token counting, we need messages
+	if len(textRequest.Messages) == 0 {
+		return nil, errors.New("field messages is required")
+	}
+
+	// Token counting is never streaming
+	relayInfo.IsStream = false
+	textRequest.Stream = false
+
+	// Save request messages for logging (but not for billing)
+	relayInfo.PromptMessages = textRequest.Messages
+
+	return textRequest, nil
+}
+
 func postConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	usage *dto.Usage, preConsumedQuota int, userQuota int, priceData helper.PriceData, extraContent string) {
 	if usage == nil {

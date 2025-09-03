@@ -232,3 +232,30 @@ type ClaudeUsage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
 }
+
+// TokenCountResponse represents the response structure for token counting requests
+type TokenCountResponse struct {
+	InputTokens int `json:"input_tokens"`
+}
+
+// TokenCountSupportedModels contains the list of Claude models that support token counting
+var TokenCountSupportedModels = []string{
+	"claude-opus-4-1-20250805",
+	"claude-opus-4-20241022",
+	"claude-sonnet-4-20250514",
+	"claude-sonnet-3-7-20241022",
+	"claude-sonnet-3-5-20241022",
+	"claude-haiku-3-5-20241022",
+	"claude-haiku-3-20240307",
+	"claude-opus-3-20240229",
+}
+
+// IsTokenCountSupportedModel validates if the given model supports token counting
+func IsTokenCountSupportedModel(model string) bool {
+	for _, supportedModel := range TokenCountSupportedModels {
+		if supportedModel == model {
+			return true
+		}
+	}
+	return false
+}
