@@ -58,6 +58,8 @@ const (
 	RelayModeResponses
 
 	RelayModeRealtime
+
+	RelayModeTokenCount
 )
 
 func Path2RelayMode(path string) int {
@@ -88,6 +90,8 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeRerank
 	} else if strings.HasPrefix(path, "/v1/realtime") {
 		relayMode = RelayModeRealtime
+	} else if strings.HasPrefix(path, "/v1/messages/count_tokens") {
+		relayMode = RelayModeTokenCount
 	}
 	return relayMode
 }

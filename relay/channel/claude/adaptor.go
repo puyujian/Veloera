@@ -25,11 +25,13 @@ import (
 	"veloera/dto"
 	"veloera/relay/channel"
 	relaycommon "veloera/relay/common"
+	"veloera/relay/constant"
 	"veloera/setting/model_setting"
 )
 
 const (
-	RequestModeMessage = 1
+	RequestModeMessage    = 1
+	RequestModeTokenCount = 2
 )
 
 type Adaptor struct {
@@ -51,11 +53,21 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
-	a.RequestMode = RequestModeMessage
+	switch info.RelayMode {
+	case constant.RelayModeTokenCount:
+		a.RequestMode = RequestModeTokenCount
+	default:
+		a.RequestMode = RequestModeMessage
+	}
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-	return fmt.Sprintf("%s/v1/messages", info.BaseUrl), nil
+	switch a.RequestMode {
+	case RequestModeTokenCount:
+		return fmt.Sprintf("%s/v1/messages/count_tokens", info.BaseUrl), nil
+	default:
+		return fmt.Sprintf("%s/v1/messages", info.BaseUrl), nil
+	}
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {
@@ -80,7 +92,12 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		request.Messages[i].ConvertArrayContentToString()
 	}
 
-	return RequestOpenAI2ClaudeMessage(*request)
+	switch a.RequestMode {
+	case RequestModeTokenCount:
+		return RequestOpenAI2ClaudeTokenCount(*request)
+	default:
+		return RequestOpenAI2ClaudeMessage(*request)
+	}
 }
 
 func (a *Adaptor) ConvertRerankRequest(c *gin.Context, relayMode int, request dto.RerankRequest) (any, error) {
@@ -102,10 +119,15 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *dto.OpenAIErrorWithStatusCode) {
-	if info.IsStream {
-		err, usage = ClaudeStreamHandler(c, resp, info, a.RequestMode)
-	} else {
-		err, usage = ClaudeHandler(c, resp, a.RequestMode, info)
+	switch a.RequestMode {
+	case RequestModeTokenCount:
+		err, usage = ClaudeTokenCountHandler(c, resp, info)
+	default:
+		if info.IsStream {
+			err, usage = ClaudeStreamHandler(c, resp, info, a.RequestMode)
+		} else {
+			err, usage = ClaudeHandler(c, resp, a.RequestMode, info)
+		}
 	}
 	return
 }

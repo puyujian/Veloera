@@ -78,6 +78,187 @@ func RequestOpenAI2ClaudeComplete(textRequest dto.GeneralOpenAIRequest) *dto.Cla
 	return &claudeRequest
 }
 
+func RequestOpenAI2ClaudeTokenCount(textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
+	// Validate that the model supports token counting
+	if !dto.IsTokenCountSupportedModel(textRequest.Model) {
+		return nil, fmt.Errorf("model %s does not support token counting", textRequest.Model)
+	}
+
+	claudeTools := make([]dto.Tool, 0, len(textRequest.Tools))
+
+	for _, tool := range textRequest.Tools {
+		if params, ok := tool.Function.Parameters.(map[string]any); ok {
+			claudeTool := dto.Tool{
+				Name:        tool.Function.Name,
+				Description: tool.Function.Description,
+			}
+			claudeTool.InputSchema = make(map[string]interface{})
+			if params["type"] != nil {
+				claudeTool.InputSchema["type"] = params["type"].(string)
+			}
+			claudeTool.InputSchema["properties"] = params["properties"]
+			claudeTool.InputSchema["required"] = params["required"]
+			for s, a := range params {
+				if s == "type" || s == "properties" || s == "required" {
+					continue
+				}
+				claudeTool.InputSchema[s] = a
+			}
+			claudeTools = append(claudeTools, claudeTool)
+		}
+	}
+
+	claudeRequest := dto.ClaudeRequest{
+		Model: textRequest.Model,
+		Tools: claudeTools,
+	}
+
+	formatMessages := make([]dto.Message, 0)
+	for i, message := range textRequest.Messages {
+		if message.Role == "" {
+			textRequest.Messages[i].Role = "user"
+		}
+		fmtMessage := dto.Message{
+			Role:    message.Role,
+			Content: message.Content,
+		}
+		if message.Role == "tool" {
+			fmtMessage.ToolCallId = message.ToolCallId
+		}
+		if message.Role == "assistant" && message.ToolCalls != nil {
+			fmtMessage.ToolCalls = message.ToolCalls
+		}
+		if fmtMessage.Content == nil {
+			content, _ := json.Marshal("...")
+			fmtMessage.Content = content
+		}
+		formatMessages = append(formatMessages, fmtMessage)
+	}
+
+	claudeMessages := make([]dto.ClaudeMessage, 0)
+	isFirstMessage := true
+	for _, message := range formatMessages {
+		if message.Role == "system" {
+			if message.IsStringContent() {
+				claudeRequest.System = message.StringContent()
+			} else {
+				contents := message.ParseContent()
+				content := ""
+				for _, ctx := range contents {
+					if ctx.Type == "text" {
+						content += ctx.Text
+					}
+				}
+				claudeRequest.System = content
+			}
+		} else {
+			if isFirstMessage {
+				isFirstMessage = false
+				if message.Role != "user" {
+					// fix: first message is assistant, add user message
+					claudeMessage := dto.ClaudeMessage{
+						Role: "user",
+						Content: []dto.ClaudeMediaMessage{
+							{
+								Type: "text",
+								Text: common.GetPointer[string]("..."),
+							},
+						},
+					}
+					claudeMessages = append(claudeMessages, claudeMessage)
+				}
+			}
+			claudeMessage := dto.ClaudeMessage{
+				Role: message.Role,
+			}
+			if message.Role == "tool" {
+				if len(claudeMessages) > 0 && claudeMessages[len(claudeMessages)-1].Role == "user" {
+					lastMessage := claudeMessages[len(claudeMessages)-1]
+					if content, ok := lastMessage.Content.(string); ok {
+						lastMessage.Content = []dto.ClaudeMediaMessage{
+							{
+								Type: "text",
+								Text: common.GetPointer[string](content),
+							},
+						}
+					}
+					lastMessage.Content = append(lastMessage.Content.([]dto.ClaudeMediaMessage), dto.ClaudeMediaMessage{
+						Type:      "tool_result",
+						ToolUseId: message.ToolCallId,
+						Content:   message.Content,
+					})
+					claudeMessages[len(claudeMessages)-1] = lastMessage
+					continue
+				} else {
+					claudeMessage.Role = "user"
+					claudeMessage.Content = []dto.ClaudeMediaMessage{
+						{
+							Type:      "tool_result",
+							ToolUseId: message.ToolCallId,
+							Content:   message.Content,
+						},
+					}
+				}
+			} else if message.IsStringContent() && message.ToolCalls == nil {
+				claudeMessage.Content = message.StringContent()
+			} else {
+				claudeMediaMessages := make([]dto.ClaudeMediaMessage, 0)
+				for _, mediaMessage := range message.ParseContent() {
+					claudeMediaMessage := dto.ClaudeMediaMessage{
+						Type: mediaMessage.Type,
+					}
+					if mediaMessage.Type == "text" {
+						claudeMediaMessage.Text = common.GetPointer[string](mediaMessage.Text)
+					} else {
+						imageUrl := mediaMessage.GetImageMedia()
+						claudeMediaMessage.Type = "image"
+						claudeMediaMessage.Source = &dto.ClaudeMessageSource{
+							Type: "base64",
+						}
+						// 判断是否是url
+						if strings.HasPrefix(imageUrl.Url, "http") {
+							// 是url，获取图片的类型和base64编码的数据
+							fileData, err := service.GetFileBase64FromUrl(imageUrl.Url)
+							if err != nil {
+								return nil, fmt.Errorf("get file base64 from url failed: %s", err.Error())
+							}
+							claudeMediaMessage.Source.MediaType = fileData.MimeType
+							claudeMediaMessage.Source.Data = fileData.Base64Data
+						} else {
+							_, format, base64String, err := service.DecodeBase64ImageData(imageUrl.Url)
+							if err != nil {
+								return nil, err
+							}
+							claudeMediaMessage.Source.MediaType = "image/" + format
+							claudeMediaMessage.Source.Data = base64String
+						}
+					}
+					claudeMediaMessages = append(claudeMediaMessages, claudeMediaMessage)
+				}
+				if message.ToolCalls != nil {
+					for _, toolCall := range message.ParseToolCalls() {
+						inputObj := make(map[string]any)
+						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &inputObj); err != nil {
+							common.SysError("tool call function arguments is not a map[string]any: " + fmt.Sprintf("%v", toolCall.Function.Arguments))
+							continue
+						}
+						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+							Type:  "tool_use",
+							Id:    toolCall.ID,
+							Name:  toolCall.Function.Name,
+							Input: inputObj,
+						})
+					}
+				}
+				claudeMessage.Content = claudeMediaMessages
+			}
+			claudeMessages = append(claudeMessages, claudeMessage)
+		}
+	}
+	claudeRequest.Messages = claudeMessages
+	return &claudeRequest, nil
+}
+
 func RequestOpenAI2ClaudeMessage(textRequest dto.GeneralOpenAIRequest) (*dto.ClaudeRequest, error) {
 	claudeTools := make([]dto.Tool, 0, len(textRequest.Tools))
 
@@ -716,6 +897,100 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 	c.Writer.WriteHeader(http.StatusOK)
 	_, err = c.Writer.Write(responseData)
 	return nil
+}
+
+func ClaudeTokenCountHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.OpenAIErrorWithStatusCode, *dto.Usage) {
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return createTokenCountError("read_response_body_failed", "Failed to read response from Claude API", http.StatusInternalServerError), nil
+	}
+	resp.Body.Close()
+
+	if common.DebugEnabled {
+		println("token count responseBody: ", string(responseBody))
+	}
+
+	// Handle non-200 status codes with enhanced error handling
+	if resp.StatusCode != http.StatusOK {
+		return handleTokenCountErrorResponse(responseBody, resp.StatusCode), nil
+	}
+
+	// Parse Claude token count response
+	var claudeTokenResponse dto.TokenCountResponse
+	err = json.Unmarshal(responseBody, &claudeTokenResponse)
+	if err != nil {
+		// Try to parse as error response first
+		var claudeError dto.ClaudeResponse
+		if parseErr := json.Unmarshal(responseBody, &claudeError); parseErr == nil && claudeError.Error != nil {
+			return createTokenCountErrorFromClaude(claudeError.Error, resp.StatusCode), nil
+		}
+		
+		// If neither parsing worked, return a generic error
+		return createTokenCountError("invalid_response_format", "Invalid response format from Claude API", http.StatusInternalServerError), nil
+	}
+
+	// Validate the response has the required field
+	if claudeTokenResponse.InputTokens < 0 {
+		return createTokenCountError("invalid_token_count", "Invalid token count received from Claude API", http.StatusInternalServerError), nil
+	}
+
+	// Return the response directly as Claude format (no conversion needed for token counting)
+	c.Writer.Header().Set("Content-Type", "application/json")
+	c.Writer.WriteHeader(http.StatusOK)
+	_, writeErr := c.Writer.Write(responseBody)
+	if writeErr != nil {
+		return createTokenCountError("write_response_failed", "Failed to write response to client", http.StatusInternalServerError), nil
+	}
+
+	// Return zero usage since token counting doesn't consume tokens
+	return nil, &dto.Usage{
+		PromptTokens:     0,
+		CompletionTokens: 0,
+		TotalTokens:      0,
+	}
+}
+
+// handleTokenCountErrorResponse handles error responses from Claude API for token counting
+func handleTokenCountErrorResponse(responseBody []byte, statusCode int) *dto.OpenAIErrorWithStatusCode {
+	// Try to parse as Claude error response
+	var claudeError dto.ClaudeResponse
+	if err := json.Unmarshal(responseBody, &claudeError); err == nil && claudeError.Error != nil {
+		return createTokenCountErrorFromClaude(claudeError.Error, statusCode)
+	}
+
+	// Try to parse as generic error response
+	var genericError map[string]interface{}
+	if err := json.Unmarshal(responseBody, &genericError); err == nil {
+		if errorMsg, ok := genericError["error"].(map[string]interface{}); ok {
+			if message, msgOk := errorMsg["message"].(string); msgOk {
+				errorType := "api_error"
+				if typeVal, typeOk := errorMsg["type"].(string); typeOk {
+					errorType = typeVal
+				}
+				return createTokenCountError(errorType, message, statusCode)
+			}
+		}
+	}
+
+	// Fallback for unknown error format
+	return createTokenCountError("upstream_error", fmt.Sprintf("Token counting failed with status %d", statusCode), statusCode)
+}
+
+// createTokenCountErrorFromClaude creates a token count error from Claude error format
+func createTokenCountErrorFromClaude(claudeErr *dto.ClaudeError, statusCode int) *dto.OpenAIErrorWithStatusCode {
+	return createTokenCountError(claudeErr.Type, claudeErr.Message, statusCode)
+}
+
+// createTokenCountError creates a Claude API-formatted error for token counting (Requirement 6.2)
+func createTokenCountError(errorType, message string, statusCode int) *dto.OpenAIErrorWithStatusCode {
+	return &dto.OpenAIErrorWithStatusCode{
+		Error: dto.OpenAIError{
+			Type:    errorType,
+			Code:    errorType,
+			Message: message,
+		},
+		StatusCode: statusCode,
+	}
 }
 
 func ClaudeHandler(c *gin.Context, resp *http.Response, requestMode int, info *relaycommon.RelayInfo) (*dto.OpenAIErrorWithStatusCode, *dto.Usage) {
