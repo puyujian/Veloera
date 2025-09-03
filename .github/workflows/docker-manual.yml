@@ -1,7 +1,7 @@
 name: Manual Docker Build
 
 on:
-  # 提交时自动触发
+  # 提交时自动触发（但排除同步机器人的提交）
   push:
     branches:
       - main
@@ -36,6 +36,8 @@ jobs:
   docker-build:
     name: 构建 Docker 镜像
     runs-on: ubuntu-latest
+    # 跳过同步机器人的提交，避免与上游同步脚本重复构建
+    if: github.actor != 'github-actions[bot]' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       packages: write
