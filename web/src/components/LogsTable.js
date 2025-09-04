@@ -798,6 +798,11 @@ const LogsTable = () => {
   const [stat, setStat] = useState({
     quota: 0,
     token: 0,
+    token_total: 0,
+    token_input: 0,
+    token_output: 0,
+    rpm: 0,
+    tpm: 0
   });
 
   const handleInputChange = (value, name) => {
@@ -812,7 +817,13 @@ const LogsTable = () => {
     let res = await API.get(url);
     const { success, message, data } = res.data;
     if (success) {
-      setStat(data);
+      // 保留现有的token统计信息，只更新API返回的数据
+      setStat(prevStat => ({
+        ...prevStat,
+        quota: data.quota || 0,
+        rpm: data.rpm || 0,
+        tpm: data.tpm || 0
+      }));
     } else {
       showError(message);
     }
@@ -826,7 +837,13 @@ const LogsTable = () => {
     let res = await API.get(url);
     const { success, message, data } = res.data;
     if (success) {
-      setStat(data);
+      // 保留现有的token统计信息，只更新API返回的数据
+      setStat(prevStat => ({
+        ...prevStat,
+        quota: data.quota || 0,
+        rpm: data.rpm || 0,
+        tpm: data.tpm || 0
+      }));
     } else {
       showError(message);
     }
