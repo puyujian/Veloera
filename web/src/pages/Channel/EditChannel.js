@@ -939,8 +939,9 @@ const EditChannel = (props) => {
   // Toggle multi-key view disable state
   const switchToSingleKeyMode = () => {
     setUseKeyListMode(false);
-    // When switching back to single mode, combine existing keys back into one string
-    const combinedKey = keyList.join(',');
+    // When switching back to single mode, filter out empty keys before joining
+    const filteredKeyList = keyList.filter(key => key && key.trim().length > 0);
+    const combinedKey = filteredKeyList.join(',');
     setInputs(inputs => ({ ...inputs, key: combinedKey }));
     setKeyList([]); // Clear key list state
   };
