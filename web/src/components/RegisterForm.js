@@ -70,46 +70,10 @@ const RegisterForm = () => {
 
   const { username, password, password2 } = inputs;
 
-  // Process AFF code on component mount
+  // Update email verification when status changes
   useEffect(() => {
-    processAffCode();
-  }, []);
-
-  // Load status and set email verification
-  useEffect(() => {
-    const updateStatus = () => {
-      let status = localStorage.getItem('status');
-      if (status) {
-        status = JSON.parse(status);
-        setStatus(status);
-        setShowEmailVerification(status.email_verification);
-      }
-    };
-
-    // Initial check
-    updateStatus();
-
-    // Listen for storage changes to handle async status loading
-    const handleStorageChange = (e) => {
-      if (e.key === 'status') {
-        updateStatus();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-
-    // Also listen for custom status update events
-    const handleStatusUpdate = () => {
-      updateStatus();
-    };
-
-    window.addEventListener('statusUpdated', handleStatusUpdate);
-
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('statusUpdated', handleStatusUpdate);
-    };
-  }, [setStatus]);
+    setShowEmailVerification(status.email_verification);
+  }, [status]);
 
   const handleSubmit = async (e) => {
     if (password.length < 8) {
