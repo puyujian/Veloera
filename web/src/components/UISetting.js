@@ -33,7 +33,7 @@ import { useTranslation } from 'react-i18next';
 import { StatusContext } from '../context/Status/index.js';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
 
-const OtherSetting = () => {
+const UISetting = () => {
   const { t } = useTranslation();
   let [inputs, setInputs] = useState({
     Notice: '',
@@ -86,9 +86,7 @@ const OtherSetting = () => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   };
 
-  // 通用设置
   const formAPISettingGeneral = useRef();
-  // 通用设置 - Notice
   const submitNotice = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Notice: true }));
@@ -101,9 +99,8 @@ const OtherSetting = () => {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Notice: false }));
     }
   };
-  // 个性化设置
+
   const formAPIPersonalization = useRef();
-  //  个性化设置 - SystemName
   const submitSystemName = async () => {
     try {
       setLoadingInput((loadingInput) => ({
@@ -123,7 +120,6 @@ const OtherSetting = () => {
     }
   };
 
-  // 个性化设置 - Logo
   const submitLogo = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Logo: true }));
@@ -136,7 +132,7 @@ const OtherSetting = () => {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Logo: false }));
     }
   };
-  // 个性化设置 - 首页内容
+
   const submitOption = async (key) => {
     try {
       setLoadingInput((loadingInput) => ({
@@ -155,7 +151,7 @@ const OtherSetting = () => {
       }));
     }
   };
-  // 个性化设置 - 关于
+
   const submitAbout = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, About: true }));
@@ -168,7 +164,7 @@ const OtherSetting = () => {
       setLoadingInput((loadingInput) => ({ ...loadingInput, About: false }));
     }
   };
-  // 个性化设置 - 页脚
+
   const submitFooter = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Footer: true }));
@@ -182,7 +178,6 @@ const OtherSetting = () => {
     }
   };
 
-  // 个性化设置 - 自定义头部HTML
   const submitCustomHeadHtml = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, custom_head_html: true }));
@@ -196,7 +191,6 @@ const OtherSetting = () => {
     }
   };
 
-  // 个性化设置 - 全局CSS样式
   const submitGlobalCss = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, global_css: true }));
@@ -210,7 +204,6 @@ const OtherSetting = () => {
     }
   };
 
-  // 个性化设置 - 全局JavaScript代码
   const submitGlobalJs = async () => {
     try {
       setLoadingInput((loadingInput) => ({ ...loadingInput, global_js: true }));
@@ -230,29 +223,16 @@ const OtherSetting = () => {
         ...loadingInput,
         CheckUpdate: true,
       }));
-      // Use a CORS proxy to avoid direct cross-origin requests to GitHub API
-      // Option 1: Use a public CORS proxy service
-      // const proxyUrl = 'https://cors-anywhere.herokuapp.com/';
-      // const res = await API.get(
-      //   `${proxyUrl}https://api.github.com/repos/Calcium-Ion/new-api/releases/latest`,
-      // );
-
-      // Option 2: Use the JSON proxy approach which often works better with GitHub API
       const res = await fetch(
         'https://api.github.com/repos/Veloera/Veloera/releases/latest',
         {
           headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
-            // Adding User-Agent which is often required by GitHub API
             'User-Agent': 'veloera-update-checker',
           },
         },
       ).then((response) => response.json());
-
-      // Option 3: Use a local proxy endpoint
-      // Create a cached version of the response to avoid frequent GitHub API calls
-      // const res = await API.get('/api/status/github-latest-release');
 
       const { tag_name, body } = res;
       if (tag_name === statusState?.status?.version) {
@@ -274,6 +254,7 @@ const OtherSetting = () => {
       }));
     }
   };
+
   const getOptions = async () => {
     const res = await API.get('/api/option/');
     const { success, message, data } = res.data;
@@ -296,7 +277,6 @@ const OtherSetting = () => {
     getOptions();
   }, []);
 
-  // Function to open GitHub release page
   const openGitHubRelease = () => {
     window.open(
       `https://github.com/Veloera/Veloera/releases/tag/${updateData.tag_name}`,
@@ -320,10 +300,9 @@ const OtherSetting = () => {
           gap: '10px',
         }}
       >
-        {/* 版本信息 */}
         <Form>
           <Card>
-            <Form.Section text={t('系统信息')}>
+            <Form.Section text={t('版本更新')}>
               <Row>
                 <Col span={16}>
                   <Space>
@@ -351,13 +330,13 @@ const OtherSetting = () => {
             </Form.Section>
           </Card>
         </Form>
-        {/* 通用设置 */}
+
         <Form
           values={inputs}
           getFormApi={(formAPI) => (formAPISettingGeneral.current = formAPI)}
         >
           <Card>
-            <Form.Section text={t('通用设置')}>
+            <Form.Section text={t('公告设置')}>
               <Form.TextArea
                 label={t('公告')}
                 placeholder={t(
@@ -374,7 +353,7 @@ const OtherSetting = () => {
             </Form.Section>
           </Card>
         </Form>
-        {/* 个性化设置 */}
+
         <Form
           values={inputs}
           getFormApi={(formAPI) => (formAPIPersonalization.current = formAPI)}
@@ -431,7 +410,7 @@ const OtherSetting = () => {
               <Button onClick={submitAbout} loading={loadingInput['About']}>
                 {t('设置关于')}
               </Button>
-              {/*  */}
+
               <Banner
                 fullMode={false}
                 type='info'
@@ -518,4 +497,4 @@ const OtherSetting = () => {
   );
 };
 
-export default OtherSetting;
+export default UISetting;
