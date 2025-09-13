@@ -361,7 +361,7 @@ const UsersTable = () => {
     }
     setSearching(true);
     const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
+      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx + 1}&page_size=${pageSize}`,
     );
     const { success, message, data } = res.data;
     if (success) {
@@ -382,9 +382,9 @@ const UsersTable = () => {
   const handlePageChange = (page) => {
     setActivePage(page);
     if (searchKeyword === '' && searchGroup === '') {
-      loadUsers(page, pageSize).then();
+      loadUsers(page - 1, pageSize).then();
     } else {
-      searchUsers(page, pageSize, searchKeyword, searchGroup).then();
+      searchUsers(page - 1, pageSize, searchKeyword, searchGroup).then();
     }
   };
 
@@ -402,9 +402,9 @@ const UsersTable = () => {
   const refresh = async () => {
     setActivePage(1);
     if (searchKeyword === '') {
-      await loadUsers(activePage, pageSize);
+      await loadUsers(0, pageSize);
     } else {
-      await searchUsers(activePage, pageSize, searchKeyword, searchGroup);
+      await searchUsers(0, pageSize, searchKeyword, searchGroup);
     }
   };
 
@@ -453,7 +453,8 @@ const UsersTable = () => {
       ></EditUser>
       <Form
         onSubmit={() => {
-          searchUsers(activePage, pageSize, searchKeyword, searchGroup);
+          setActivePage(1);
+          searchUsers(0, pageSize, searchKeyword, searchGroup);
         }}
         labelPosition='left'
       >
@@ -480,7 +481,8 @@ const UsersTable = () => {
               optionList={groupOptions}
               onChange={(value) => {
                 setSearchGroup(value);
-                searchUsers(activePage, pageSize, searchKeyword, value);
+                setActivePage(1);
+                searchUsers(0, pageSize, searchKeyword, value);
               }}
             />
             <Button
