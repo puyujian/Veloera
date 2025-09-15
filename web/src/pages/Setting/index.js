@@ -21,12 +21,14 @@ import { Layout, TabPane, Tabs } from '@douyinfe/semi-ui';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
-import SystemSetting from '../../components/SystemSetting';
 import { isRoot } from '../../helpers';
-import OtherSetting from '../../components/OtherSetting';
 import PersonalSetting from '../../components/PersonalSetting';
-import OperationSetting from '../../components/OperationSetting';
-import RateLimitSetting from '../../components/RateLimitSetting.js';
+import BasicSetting from '../../components/BasicSetting.js';
+import AuthSetting from '../../components/AuthSetting.js';
+import BusinessSetting from '../../components/BusinessSetting.js';
+import MonitorSetting from '../../components/MonitorSetting.js';
+import ContentSetting from '../../components/ContentSetting.js';
+import UISetting from '../../components/UISetting.js';
 import ModelSetting from '../../components/ModelSetting.js';
 
 const Setting = () => {
@@ -38,29 +40,39 @@ const Setting = () => {
 
   if (isRoot()) {
     panes.push({
-      tab: t('运营设置'),
-      content: <OperationSetting />,
-      itemKey: 'operation',
+      tab: t('基础配置'),
+      content: <BasicSetting />,
+      itemKey: 'basic',
     });
     panes.push({
-      tab: t('速率限制设置'),
-      content: <RateLimitSetting />,
-      itemKey: 'ratelimit',
+      tab: t('用户与认证'),
+      content: <AuthSetting />,
+      itemKey: 'auth',
     });
     panes.push({
-      tab: t('模型相关设置'),
+      tab: t('业务运营'),
+      content: <BusinessSetting />,
+      itemKey: 'business',
+    });
+    panes.push({
+      tab: t('模型管理'),
       content: <ModelSetting />,
       itemKey: 'models',
     });
     panes.push({
-      tab: t('系统设置'),
-      content: <SystemSetting />,
-      itemKey: 'system',
+      tab: t('监控与日志'),
+      content: <MonitorSetting />,
+      itemKey: 'monitor',
     });
     panes.push({
-      tab: t('其他设置'),
-      content: <OtherSetting />,
-      itemKey: 'other',
+      tab: t('内容管理'),
+      content: <ContentSetting />,
+      itemKey: 'content',
+    });
+    panes.push({
+      tab: t('界面定制'),
+      content: <UISetting />,
+      itemKey: 'ui',
     });
   }
   const onChangeTab = (key) => {
@@ -73,7 +85,7 @@ const Setting = () => {
     if (tab) {
       setTabActiveKey(tab);
     } else {
-      onChangeTab('operation');
+      onChangeTab('basic');
     }
   }, [location.search]);
   return (
