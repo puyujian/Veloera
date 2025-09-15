@@ -57,6 +57,8 @@ import {
   Typography,
   Checkbox,
   Layout,
+  Radio,
+  RadioGroup,
 } from '@douyinfe/semi-ui';
 import EditChannel from '../pages/Channel/EditChannel';
 import {
@@ -1096,6 +1098,11 @@ const ChannelsTable = () => {
   }, [enableTagMode]);
   const [showBatchSetTag, setShowBatchSetTag] = useState(false);
   const [batchSetTagValue, setBatchSetTagValue] = useState('');
+  // 批量模型同步弹窗与模式
+  const [showSyncModelsModal, setShowSyncModelsModal] = useState(false);
+  const [syncMode, setSyncMode] = useState('incremental'); // incremental | replace
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
@@ -2083,6 +2090,30 @@ const ChannelsTable = () => {
     }
   };
 
+  // 批量模型同步
+  const syncAllChannelModels = async () => {
+    setSyncing(true);
+    try {
+      const res = await API.post('/api/channel/models/sync', { mode: syncMode });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('模型同步失败'));
+        setSyncing(false);
+        return;
+      }
+      setSyncResult(data);
+      const succ = data?.success || 0;
+      const fail = data?.failed || 0;
+      showInfo(t('批量模型同步完成：成功 {{succ}}，失败 {{fail}}', { succ, fail }));
+      // 同步后刷新表格（保持当前筛选/分页）
+      await refresh();
+    } catch (e) {
+      showError((e && e.message) ? e.message : t('模型同步失败'));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const submitTagEdit = async (type, data) => {
     switch (type) {
       case 'priority':
@@ -2416,6 +2447,16 @@ const ChannelsTable = () => {
                       </Button>
                     </Popconfirm>
                   </Dropdown.Item>
+                  <Dropdown.Item>
+                    <Button
+                      theme='light'
+                      type='tertiary'
+                      style={{ width: '100%' }}
+                      onClick={() => setShowSyncModelsModal(true)}
+                    >
+                      {t('批量模型同步')}
+                    </Button>
+                  </Dropdown.Item>
                 </Dropdown.Menu>
               }
             >
@@ -2598,6 +2639,72 @@ const ChannelsTable = () => {
             {t('已选择 {{count}} 个渠道', { count: selectedChannels.length })}
           </Typography.Text>
         </div>
+      </Modal>
+
+      {/* 批量模型同步弹窗 */}
+      <Modal
+        title={t('批量模型同步')}
+        visible={showSyncModelsModal}
+        onCancel={() => { setShowSyncModelsModal(false); setSyncResult(null); }}
+        onOk={syncAllChannelModels}
+        okText={syncing ? t('同步中...') : t('开始同步')}
+        okButtonProps={{ loading: syncing }}
+        maskClosable={false}
+        centered={true}
+        style={{ width: isMobile() ? '92%' : 720 }}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text>{t('请选择同步模式')}：</Typography.Text>
+        </div>
+        <RadioGroup
+          type='button'
+          value={syncMode}
+          onChange={(v) => setSyncMode(v)}
+          style={{ marginBottom: 16 }}
+        >
+          <Radio value='incremental'>
+            {t('增量同步（仅移除上游已不存在的模型，保留仍有效的本地模型）')}
+          </Radio>
+          <Radio value='replace' style={{ marginLeft: 8 }}>
+            {t('完全替换（使用上游最新模型列表覆盖本地配置）')}
+          </Radio>
+        </RadioGroup>
+
+        <Typography.Text type='tertiary'>
+          {t('说明：同步过程中某些渠道上游不可达将被跳过，其他渠道继续处理。')}
+        </Typography.Text>
+
+        {syncResult && (
+          <div style={{ marginTop: 16, maxHeight: '50vh', overflowY: 'auto', border: '1px solid var(--semi-color-border)', borderRadius: 6, padding: 12 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Typography.Text strong>
+                {t('执行结果：总计 {{total}}，成功 {{succ}}，失败 {{fail}}', { total: syncResult.total, succ: syncResult.success, fail: syncResult.failed })}
+              </Typography.Text>
+            </div>
+            {Array.isArray(syncResult.results) && syncResult.results.length > 0 ? (
+              syncResult.results.map((r, idx) => (
+                <div key={idx} style={{ padding: '8px 0', borderBottom: '1px dashed var(--semi-color-border)' }}>
+                  <Typography.Text>
+                    {r.error ? '❌' : '✅'} {r.channel_name} (ID {r.channel_id}) — {t('上游')} {r.upstream_count} | {t('本地')} {r.before_count} → {r.after_count}
+                  </Typography.Text>
+                  {!r.error && (
+                    <div style={{ marginTop: 4, color: 'var(--semi-color-text-2)' }}>
+                      <span>{t('移除')} {r.removed_models?.length || 0}</span>
+                      <span style={{ marginLeft: 12 }}>{t('新增')} {r.added_models?.length || 0}</span>
+                    </div>
+                  )}
+                  {r.error && (
+                    <div style={{ marginTop: 4, color: 'var(--semi-color-danger)' }}>
+                      {r.error}
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <Typography.Text type='tertiary'>{t('无结果')}</Typography.Text>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* 模型测试弹窗 */}
