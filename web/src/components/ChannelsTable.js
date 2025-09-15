@@ -2668,13 +2668,16 @@ const ChannelsTable = () => {
         <RadioGroup
           type='button'
           value={syncMode}
-          onChange={(v) => setSyncMode(v)}
-          style={{ marginBottom: 16 }}
+          onChange={(val) => {
+            const v = typeof val === 'string' ? val : (val && val.target && val.target.value) ? val.target.value : val?.value;
+            setSyncMode(v || 'incremental');
+          }}
+          style={{ marginBottom: 16, display: 'flex', gap: 8 }}
         >
-          <Radio value='incremental'>
+          <Radio value='incremental' style={{ flex: 1, textAlign: 'center' }}>
             {t('增量同步（仅移除上游已不存在的模型，保留仍有效的本地模型）')}
           </Radio>
-          <Radio value='replace' style={{ marginLeft: 8 }}>
+          <Radio value='replace' style={{ flex: 1, textAlign: 'center' }}>
             {t('完全替换（使用上游最新模型列表覆盖本地配置）')}
           </Radio>
         </RadioGroup>
@@ -2683,17 +2686,17 @@ const ChannelsTable = () => {
           <Typography.Text>{t('同步范围')}</Typography.Text>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
-          <Checkbox checked={syncEnabledOnly} onChange={setSyncEnabledOnly}>
+          <Checkbox checked={syncEnabledOnly} onChange={(e) => setSyncEnabledOnly(!!e?.target?.checked)}>
             {t('仅同步已启用通道')}
           </Checkbox>
           <Checkbox
             checked={syncSelectedOnly}
-            onChange={setSyncSelectedOnly}
+            onChange={(e) => setSyncSelectedOnly(!!e?.target?.checked)}
             disabled={selectedChannels.length === 0}
           >
             {t('仅同步所选通道（已选 {{count}} 个）', { count: selectedChannels.length })}
           </Checkbox>
-          <Checkbox checked={syncPreview} onChange={setSyncPreview}>
+          <Checkbox checked={syncPreview} onChange={(e) => setSyncPreview(!!e?.target?.checked)}>
             {t('预览模式（仅展示差异，不写入数据库）')}
           </Checkbox>
         </div>
