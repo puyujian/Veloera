@@ -66,9 +66,15 @@ func SyncChannelModelsV2(c *gin.Context) {
         channels = make([]*model.Channel, 0, len(req.Ids))
         for _, id := range req.Ids {
             ch, e := model.GetChannelById(id, true)
-            if e == nil && ch != nil {
-                channels = append(channels, ch)
+            if e != nil {
+                common.SysError(fmt.Sprintf("[模型同步] 获取渠道 %d 时发生错误: %s", id, e.Error()))
+                continue
             }
+            if ch == nil {
+                common.SysError(fmt.Sprintf("[模型同步] 渠道 %d 不存在，已跳过", id))
+                continue
+            }
+            channels = append(channels, ch)
         }
     } else {
         channels, err = model.GetAllChannels(0, 0, true, false)
@@ -102,16 +108,22 @@ func SyncChannelModelsV2(c *gin.Context) {
         key := strings.Split(ch.Key, ",")[0]
         url := buildModelsURL(ch)
         body, err := GetResponseBody("GET", url, ch, GetAuthHeader(key))
-        if err != nil { return nil, err }
+        if err != nil {
+            return nil, fmt.Errorf("请求上游失败 (渠道 %d: %s, URL: %s): %w", ch.Id, ch.Name, url, err)
+        }
         if ch.Type == common.ChannelTypeGitHub {
             var arr []struct{ ID string `json:"id"` }
-            if e := json.Unmarshal(body, &arr); e != nil { return nil, e }
+            if e := json.Unmarshal(body, &arr); e != nil {
+                return nil, fmt.Errorf("解析 GitHub 响应失败 (渠道 %d: %s, URL: %s): %w", ch.Id, ch.Name, url, e)
+            }
             ids := make([]string, 0, len(arr))
             for _, m := range arr { ids = append(ids, m.ID) }
             return ids, nil
         }
         var result OpenAIModelsResponse
-        if e := json.Unmarshal(body, &result); e != nil { return nil, e }
+        if e := json.Unmarshal(body, &result); e != nil {
+            return nil, fmt.Errorf("解析 OpenAI 响应失败 (渠道 %d: %s, 类型: %d, URL: %s): %w", ch.Id, ch.Name, ch.Type, url, e)
+        }
         ids := make([]string, 0, len(result.Data))
         for _, m := range result.Data {
             id := m.ID
@@ -215,7 +227,14 @@ func ApplyChannelModelSync(c *gin.Context) {
     failed := 0
     for _, item := range req.Items {
         ch, err := model.GetChannelById(item.ChannelID, true)
-        if err != nil || ch == nil {
+        if err != nil {
+            common.SysError(fmt.Sprintf("[模型同步保存] 获取渠道 %d 时发生错误: %s", item.ChannelID, err.Error()))
+            results = append(results, ApplyResult{ChannelID: item.ChannelID, Applied: false, Error: fmt.Sprintf("获取渠道失败: %s", err.Error())})
+            failed++
+            continue
+        }
+        if ch == nil {
+            common.SysError(fmt.Sprintf("[模型同步保存] 渠道 %d 不存在", item.ChannelID))
             results = append(results, ApplyResult{ChannelID: item.ChannelID, Applied: false, Error: "渠道不存在"})
             failed++
             continue

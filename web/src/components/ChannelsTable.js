@@ -1106,6 +1106,7 @@ const ChannelsTable = () => {
   const [applying, setApplying] = useState(false);
   const [syncEnabledOnly, setSyncEnabledOnly] = useState(false);
   const [syncSelectedOnly, setSyncSelectedOnly] = useState(false);
+  const [syncConcurrency, setSyncConcurrency] = useState(8);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
@@ -2097,10 +2098,30 @@ const ChannelsTable = () => {
   const syncAllChannelModels = async () => {
     setSyncing(true);
     try {
-      const payload = { mode: syncMode, enabled_only: syncEnabledOnly };
+      // 验证并限制并发数到 1-32 范围内
+      const concurrency = Math.max(1, Math.min(32, Math.floor(Number(syncConcurrency) || 8)));
+
+      const payload = {
+        mode: syncMode,
+        enabled_only: syncEnabledOnly,
+        concurrency
+      };
+
       if (syncSelectedOnly && selectedChannels.length > 0) {
-        payload.ids = selectedChannels.map(c => c.id);
+        // 过滤出只有数字 ID 的通道
+        const validChannels = selectedChannels.filter(c =>
+          typeof c.id === 'number' || Number.isInteger(Number(c.id))
+        );
+
+        if (validChannels.length === 0) {
+          showError(t('所选通道中没有有效的数字 ID，无法执行同步'));
+          setSyncing(false);
+          return;
+        }
+
+        payload.ids = validChannels.map(c => Number(c.id));
       }
+
       const res = await API.post('/api/channel/models/sync', payload);
       const { success, message, data } = res.data || {};
       if (!success) {
@@ -2747,6 +2768,26 @@ const ChannelsTable = () => {
           >
             {t('仅同步所选通道（已选 {{count}} 个）', { count: selectedChannels.length })}
           </Checkbox>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+            <Typography.Text>{t('并发数：')}</Typography.Text>
+            <Input
+              type='number'
+              value={syncConcurrency}
+              onChange={(value) => {
+                const num = Math.max(1, Math.min(32, Math.floor(Number(value) || 8)));
+                setSyncConcurrency(num);
+              }}
+              min={1}
+              max={32}
+              step={1}
+              style={{ width: 80 }}
+              placeholder='8'
+            />
+            <Typography.Text type='tertiary' style={{ fontSize: '12px' }}>
+              {t('(1-32)')}
+            </Typography.Text>
+          </div>
 
         </div>
 
