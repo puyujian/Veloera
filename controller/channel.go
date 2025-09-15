@@ -235,8 +235,10 @@ func FixChannelsAbilities(c *gin.Context) {
 // 出错的渠道会被跳过，整体继续处理，并返回详细结果
 func SyncChannelModels(c *gin.Context) {
     type SyncRequest struct {
-        Mode string `json:"mode"` // incremental | replace
-        Ids  []int  `json:"ids"`  // 可选：指定需要同步的渠道ID；为空则同步全部
+        Mode        string `json:"mode"`          // incremental | replace
+        Ids         []int  `json:"ids"`           // 可选：指定需要同步的渠道ID；为空则同步全部
+        EnabledOnly bool   `json:"enabled_only"` // 仅同步已启用渠道
+        Preview     bool   `json:"preview"`      // 预览模式（不落库）
     }
     type ChannelSyncResult struct {
         ChannelID       int      `json:"channel_id"`
@@ -300,6 +302,17 @@ func SyncChannelModels(c *gin.Context) {
         }
     }
 
+    // 仅同步已启用渠道
+    if req.EnabledOnly {
+        filtered := make([]*model.Channel, 0, len(channels))
+        for _, ch := range channels {
+            if ch != nil && ch.Status == common.ChannelStatusEnabled {
+                filtered = append(filtered, ch)
+            }
+        }
+        channels = filtered
+    }
+
     // 工具函数：根据渠道类型与 BaseURL 生成 /models URL
     buildModelsURL := func(ch *model.Channel) string {
         baseURL := common.ChannelBaseURLs[ch.Type]
@@ -358,7 +371,6 @@ func SyncChannelModels(c *gin.Context) {
     results := make([]ChannelSyncResult, 0, len(channels))
     success := 0
     failed := 0
-    changedGroups := make(map[string]struct{})
 
     for _, ch := range channels {
         if ch == nil {
@@ -461,17 +473,19 @@ func SyncChannelModels(c *gin.Context) {
         }
 
         if !equal(current, next) {
-            // 更新 DB
-            ch.Models = strings.Join(next, ",")
-            if e := ch.Update(); e != nil {
-                res.Error = e.Error()
-                results = append(results, res)
-                failed++
-                common.SysError(fmt.Sprintf("[模型同步] 渠道 %d(%s) 写库失败: %s", ch.Id, ch.Name, e.Error()))
-                continue
+            // 预览模式不落库
+            if !req.Preview {
+                ch.Models = strings.Join(next, ",")
+                if e := ch.Update(); e != nil {
+                    res.Error = e.Error()
+                    results = append(results, res)
+                    failed++
+                    common.SysError(fmt.Sprintf("[模型同步] 渠道 %d(%s) 写库失败: %s", ch.Id, ch.Name, e.Error()))
+                    continue
+                }
+                // 刷新该渠道所在分组的前缀缓存
+                middleware.RefreshPrefixChannelsCache(ch.Group)
             }
-            // 刷新该渠道所在分组的前缀缓存
-            middleware.RefreshPrefixChannelsCache(ch.Group)
         }
 
         success++

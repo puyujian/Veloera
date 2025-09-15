@@ -1103,6 +1103,9 @@ const ChannelsTable = () => {
   const [syncMode, setSyncMode] = useState('incremental'); // incremental | replace
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [syncPreview, setSyncPreview] = useState(false);
+  const [syncEnabledOnly, setSyncEnabledOnly] = useState(false);
+  const [syncSelectedOnly, setSyncSelectedOnly] = useState(false);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
@@ -2094,7 +2097,11 @@ const ChannelsTable = () => {
   const syncAllChannelModels = async () => {
     setSyncing(true);
     try {
-      const res = await API.post('/api/channel/models/sync', { mode: syncMode });
+      const payload = { mode: syncMode, preview: syncPreview, enabled_only: syncEnabledOnly };
+      if (syncSelectedOnly && selectedChannels.length > 0) {
+        payload.ids = selectedChannels.map(c => c.id);
+      }
+      const res = await API.post('/api/channel/models/sync', payload);
       const { success, message, data } = res.data || {};
       if (!success) {
         showError(message || t('模型同步失败'));
@@ -2105,8 +2112,10 @@ const ChannelsTable = () => {
       const succ = data?.success || 0;
       const fail = data?.failed || 0;
       showInfo(t('批量模型同步完成：成功 {{succ}}，失败 {{fail}}', { succ, fail }));
-      // 同步后刷新表格（保持当前筛选/分页）
-      await refresh();
+      // 非预览模式下刷新表格
+      if (!syncPreview) {
+        await refresh();
+      }
     } catch (e) {
       showError((e && e.message) ? e.message : t('模型同步失败'));
     } finally {
@@ -2669,6 +2678,25 @@ const ChannelsTable = () => {
             {t('完全替换（使用上游最新模型列表覆盖本地配置）')}
           </Radio>
         </RadioGroup>
+
+        <div style={{ margin: '8px 0 12px 0' }}>
+          <Typography.Text>{t('同步范围')}</Typography.Text>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          <Checkbox checked={syncEnabledOnly} onChange={setSyncEnabledOnly}>
+            {t('仅同步已启用通道')}
+          </Checkbox>
+          <Checkbox
+            checked={syncSelectedOnly}
+            onChange={setSyncSelectedOnly}
+            disabled={selectedChannels.length === 0}
+          >
+            {t('仅同步所选通道（已选 {{count}} 个）', { count: selectedChannels.length })}
+          </Checkbox>
+          <Checkbox checked={syncPreview} onChange={setSyncPreview}>
+            {t('预览模式（仅展示差异，不写入数据库）')}
+          </Checkbox>
+        </div>
 
         <Typography.Text type='tertiary'>
           {t('说明：同步过程中某些渠道上游不可达将被跳过，其他渠道继续处理。')}
