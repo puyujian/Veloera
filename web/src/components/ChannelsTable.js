@@ -57,6 +57,8 @@ import {
   Typography,
   Checkbox,
   Layout,
+  Radio,
+  RadioGroup,
 } from '@douyinfe/semi-ui';
 import EditChannel from '../pages/Channel/EditChannel';
 import {
@@ -1096,6 +1098,14 @@ const ChannelsTable = () => {
   }, [enableTagMode]);
   const [showBatchSetTag, setShowBatchSetTag] = useState(false);
   const [batchSetTagValue, setBatchSetTagValue] = useState('');
+  // 批量模型同步弹窗与模式
+  const [showSyncModelsModal, setShowSyncModelsModal] = useState(false);
+  const [syncMode, setSyncMode] = useState('incremental'); // incremental | full
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+  const [applying, setApplying] = useState(false);
+  const [syncEnabledOnly, setSyncEnabledOnly] = useState(false);
+  const [syncSelectedOnly, setSyncSelectedOnly] = useState(false);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
@@ -2083,6 +2093,63 @@ const ChannelsTable = () => {
     }
   };
 
+  // 批量模型同步
+  const syncAllChannelModels = async () => {
+    setSyncing(true);
+    try {
+      const payload = { mode: syncMode, enabled_only: syncEnabledOnly };
+      if (syncSelectedOnly && selectedChannels.length > 0) {
+        payload.ids = selectedChannels.map(c => c.id);
+      }
+      const res = await API.post('/api/channel/models/sync', payload);
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('模型同步失败'));
+        setSyncing(false);
+        return;
+      }
+      setSyncResult(data);
+      const succ = data?.success || 0;
+      const fail = data?.failed || 0;
+      showInfo(t('批量模型同步完成：成功 {{succ}}，失败 {{fail}}', { succ, fail }));
+    } catch (e) {
+      showError((e && e.message) ? e.message : t('模型同步失败'));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // 应用预览结果，保存到后端
+  const applySyncResult = async () => {
+    if (!syncResult || !Array.isArray(syncResult.results)) {
+      return;
+    }
+    const items = syncResult.results
+      ?.filter(r => !r.error && Array.isArray(r.next_models))
+      ?.map(r => ({ channel_id: r.channel_id, next_models: r.next_models })) || [];
+    if (items.length === 0) {
+      showInfo(t('没有可保存的变更'));
+      return;
+    }
+    setApplying(true);
+    try {
+      const res = await API.post('/api/channel/models/apply', { items });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('保存失败'));
+        return;
+      }
+      showSuccess(t('保存完成：成功 {{succ}}，失败 {{fail}}', { succ: data?.success || 0, fail: data?.failed || 0 }));
+      await refresh();
+      setShowSyncModelsModal(false);
+      setSyncResult(null);
+    } catch (e) {
+      showError((e && e.message) ? e.message : t('保存失败'));
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const submitTagEdit = async (type, data) => {
     switch (type) {
       case 'priority':
@@ -2416,6 +2483,16 @@ const ChannelsTable = () => {
                       </Button>
                     </Popconfirm>
                   </Dropdown.Item>
+                  <Dropdown.Item>
+                    <Button
+                      theme='light'
+                      type='tertiary'
+                      style={{ width: '100%' }}
+                      onClick={() => setShowSyncModelsModal(true)}
+                    >
+                      {t('批量模型同步')}
+                    </Button>
+                  </Dropdown.Item>
                 </Dropdown.Menu>
               }
             >
@@ -2598,6 +2675,116 @@ const ChannelsTable = () => {
             {t('已选择 {{count}} 个渠道', { count: selectedChannels.length })}
           </Typography.Text>
         </div>
+      </Modal>
+
+      {/* 批量模型同步弹窗 */}
+      <Modal
+        title={t('批量模型同步')}
+        visible={showSyncModelsModal}
+        onCancel={() => { setShowSyncModelsModal(false); setSyncResult(null); }}
+        maskClosable={false}
+        centered={true}
+        style={{ width: isMobile() ? '92%' : 720 }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => { setShowSyncModelsModal(false); setSyncResult(null); }}>
+              {t('取消')}
+            </Button>
+            {!syncResult && (
+              <Button type='primary' loading={syncing} onClick={syncAllChannelModels}>
+                {syncing ? t('同步中...') : t('开始同步')}
+              </Button>
+            )}
+            {syncResult && (
+              <Button type='primary' loading={applying} onClick={applySyncResult}>
+                {applying ? t('保存中...') : t('保存变更')}
+              </Button>
+            )}
+          </div>
+        }
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text>{t('请选择同步模式')}：</Typography.Text>
+        </div>
+        <RadioGroup
+          type='button'
+          value={syncMode}
+          onChange={(val) => {
+            const v = typeof val === 'string' ? val : (val && val.target && val.target.value) ? val.target.value : val?.value;
+            setSyncMode(v || 'incremental');
+          }}
+          style={{ marginBottom: 16, display: 'flex', gap: 8 }}
+        >
+          <Radio value='incremental' style={{ flex: 1, textAlign: 'center' }}>
+            {t('增量同步')}
+          </Radio>
+          <Radio value='full' style={{ flex: 1, textAlign: 'center' }}>
+            {t('完全同步')}
+          </Radio>
+        </RadioGroup>
+
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text type='tertiary'>
+            {t('模式说明：')}
+          </Typography.Text>
+          <div style={{ marginTop: 4, lineHeight: 1.6 }}>
+            <div>• {t('增量同步：仅移除上游已不存在的模型，不新增。')}</div>
+            <div>• {t('完全同步：以上游模型为准，覆盖本地并同步新增与移除。')}</div>
+          </div>
+        </div>
+
+        <div style={{ margin: '8px 0 12px 0' }}>
+          <Typography.Text>{t('同步范围')}</Typography.Text>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+          <Checkbox checked={syncEnabledOnly} onChange={(e) => setSyncEnabledOnly(!!e?.target?.checked)}>
+            {t('仅同步已启用通道')}
+          </Checkbox>
+          <Checkbox
+            checked={syncSelectedOnly}
+            onChange={(e) => setSyncSelectedOnly(!!e?.target?.checked)}
+            disabled={selectedChannels.length === 0}
+          >
+            {t('仅同步所选通道（已选 {{count}} 个）', { count: selectedChannels.length })}
+          </Checkbox>
+
+        </div>
+
+        <Typography.Text type='tertiary'>
+          {t('说明：同步过程中某些渠道上游不可达将被跳过，其他渠道继续处理。')}
+        </Typography.Text>
+
+        {syncResult && (
+          <div style={{ marginTop: 16, maxHeight: '50vh', overflowY: 'auto', border: '1px solid var(--semi-color-border)', borderRadius: 6, padding: 12 }}>
+            <div style={{ marginBottom: 8 }}>
+              <Typography.Text strong>
+                {t('执行结果：总计 {{total}}，成功 {{succ}}，失败 {{fail}}', { total: syncResult.total, succ: syncResult.success, fail: syncResult.failed })}
+              </Typography.Text>
+            </div>
+            {Array.isArray(syncResult.results) && syncResult.results.length > 0 ? (
+              syncResult.results.map((r, idx) => (
+                <div key={idx} style={{ padding: '8px 0', borderBottom: '1px dashed var(--semi-color-border)' }}>
+                  <Typography.Text>
+                    {r.error ? '❌' : '✅'} {r.channel_name} (ID {r.channel_id}) — {t('上游')} {r.upstream_count} | {t('本地')} {r.before_count} → {r.after_count}
+                  </Typography.Text>
+                  {!r.error && (
+                    <div style={{ marginTop: 4, color: 'var(--semi-color-text-2)' }}>
+                      <span>{t('移除')} {r.removed_models?.length || 0}</span>
+                      <span style={{ marginLeft: 12 }}>{t('新增')} {r.added_models?.length || 0}</span>
+                    </div>
+                  )}
+                  {r.error && (
+                    <div style={{ marginTop: 4, color: 'var(--semi-color-danger)' }}>
+                      {r.error}
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <Typography.Text type='tertiary'>{t('无结果')}</Typography.Text>
+            )}
+          </div>
+        )}
       </Modal>
 
       {/* 模型测试弹窗 */}

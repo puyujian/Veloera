@@ -228,6 +228,284 @@ func FixChannelsAbilities(c *gin.Context) {
 	})
 }
 
+// 批量模型同步
+// 支持两种模式：
+// - incremental：仅移除本地中已被上游移除/废弃的模型（与上游取交集），不新增
+// - replace：完全使用上游返回的模型列表覆盖本地
+// 出错的渠道会被跳过，整体继续处理，并返回详细结果
+func SyncChannelModels(c *gin.Context) {
+    type SyncRequest struct {
+        Mode        string `json:"mode"`          // incremental | replace
+        Ids         []int  `json:"ids"`           // 可选：指定需要同步的渠道ID；为空则同步全部
+        EnabledOnly bool   `json:"enabled_only"` // 仅同步已启用渠道
+        Preview     bool   `json:"preview"`      // 预览模式（不落库）
+    }
+    type ChannelSyncResult struct {
+        ChannelID       int      `json:"channel_id"`
+        ChannelName     string   `json:"channel_name"`
+        Mode            string   `json:"mode"`
+        BeforeCount     int      `json:"before_count"`
+        UpstreamCount   int      `json:"upstream_count"`
+        AfterCount      int      `json:"after_count"`
+        RemovedModels   []string `json:"removed_models"`
+        AddedModels     []string `json:"added_models"`
+        Error           string   `json:"error,omitempty"`
+        Group           string   `json:"group"`
+        UpstreamPreview []string `json:"upstream_preview,omitempty"`
+    }
+    type SyncResponse struct {
+        Total       int                   `json:"total"`
+        Success     int                   `json:"success"`
+        Failed      int                   `json:"failed"`
+        Mode        string                `json:"mode"`
+        Results     []ChannelSyncResult   `json:"results"`
+    }
+
+    var req SyncRequest
+    if err := c.ShouldBindJSON(&req); err != nil {
+        c.JSON(http.StatusBadRequest, gin.H{
+            "success": false,
+            "message": "参数错误",
+        })
+        return
+    }
+    mode := strings.ToLower(strings.TrimSpace(req.Mode))
+    if mode != "incremental" && mode != "replace" {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "mode 仅支持 incremental 或 replace",
+        })
+        return
+    }
+
+    // 加载渠道列表（需要包含 key）
+    // 若传入 ids 则只处理指定渠道
+    var channels []*model.Channel
+    var err error
+    if len(req.Ids) > 0 {
+        channels = make([]*model.Channel, 0, len(req.Ids))
+        for _, id := range req.Ids {
+            ch, e := model.GetChannelById(id, true)
+            if e == nil && ch != nil {
+                channels = append(channels, ch)
+            }
+        }
+    } else {
+        // selectAll=true 以便不省略 key 字段
+        channels, err = model.GetAllChannels(0, 0, true, false)
+        if err != nil {
+            c.JSON(http.StatusOK, gin.H{
+                "success": false,
+                "message": err.Error(),
+            })
+            return
+        }
+    }
+
+    // 仅同步已启用渠道
+    if req.EnabledOnly {
+        filtered := make([]*model.Channel, 0, len(channels))
+        for _, ch := range channels {
+            if ch != nil && ch.Status == common.ChannelStatusEnabled {
+                filtered = append(filtered, ch)
+            }
+        }
+        channels = filtered
+    }
+
+    // 工具函数：根据渠道类型与 BaseURL 生成 /models URL
+    buildModelsURL := func(ch *model.Channel) string {
+        baseURL := common.ChannelBaseURLs[ch.Type]
+        if ch.GetBaseURL() != "" {
+            baseURL = ch.GetBaseURL()
+        }
+        url := fmt.Sprintf("%s/v1/models", baseURL)
+        if strings.HasSuffix(baseURL, "/chat/completions") {
+            url = strings.TrimSuffix(baseURL, "/chat/completions") + "/models"
+        }
+        if ch.Type == common.ChannelTypeGemini {
+            url = fmt.Sprintf("%s/v1beta/openai/models", baseURL)
+        }
+        if ch.Type == common.ChannelTypeGitHub {
+            url = strings.Replace(baseURL, "/inference", "/catalog/models", 1)
+        }
+        return url
+    }
+
+    // 工具函数：请求上游并解析模型 ID 列表
+    fetchUpstream := func(ch *model.Channel) ([]string, error) {
+        key := strings.Split(ch.Key, ",")[0]
+        url := buildModelsURL(ch)
+        // 直接使用 GetResponseBody 保持与单通道查询一致的身份头等细节
+        body, err := GetResponseBody("GET", url, ch, GetAuthHeader(key))
+        if err != nil {
+            return nil, err
+        }
+        // GitHub 裸数组
+        if ch.Type == common.ChannelTypeGitHub {
+            var arr []struct{ ID string `json:"id"` }
+            if e := json.Unmarshal(body, &arr); e != nil {
+                return nil, fmt.Errorf("解析 GitHub 响应失败: %s", e.Error())
+            }
+            ids := make([]string, 0, len(arr))
+            for _, m := range arr {
+                ids = append(ids, m.ID)
+            }
+            return ids, nil
+        }
+        var result OpenAIModelsResponse
+        if e := json.Unmarshal(body, &result); e != nil {
+            return nil, fmt.Errorf("解析响应失败: %s", e.Error())
+        }
+        ids := make([]string, 0, len(result.Data))
+        for _, m := range result.Data {
+            id := m.ID
+            if ch.Type == common.ChannelTypeGemini {
+                id = strings.TrimPrefix(id, "models/")
+            }
+            ids = append(ids, id)
+        }
+        return ids, nil
+    }
+
+    results := make([]ChannelSyncResult, 0, len(channels))
+    success := 0
+    failed := 0
+
+    for _, ch := range channels {
+        if ch == nil {
+            continue
+        }
+        res := ChannelSyncResult{
+            ChannelID:   ch.Id,
+            ChannelName: ch.Name,
+            Mode:        mode,
+            Group:       ch.Group,
+        }
+        // 当前本地模型
+        current := ch.GetModels()
+        res.BeforeCount = len(current)
+
+        upstream, err := fetchUpstream(ch)
+        if err != nil {
+            res.Error = err.Error()
+            results = append(results, res)
+            failed++
+            common.SysError(fmt.Sprintf("[模型同步] 渠道 %d(%s) 获取上游模型失败: %s", ch.Id, ch.Name, err.Error()))
+            continue
+        }
+        res.UpstreamCount = len(upstream)
+        if len(upstream) == 0 {
+            // 上游无返回，跳过，避免误清空
+            res.Error = "上游返回空模型列表，已跳过"
+            results = append(results, res)
+            failed++
+            continue
+        }
+
+        upstreamSet := make(map[string]struct{}, len(upstream))
+        for _, m := range upstream {
+            m = strings.TrimSpace(m)
+            if m != "" {
+                upstreamSet[m] = struct{}{}
+            }
+        }
+
+        var next []string
+        removed := make([]string, 0)
+        added := make([]string, 0)
+
+        if mode == "incremental" {
+            // 仅保留仍存在于上游的本地模型
+            for _, m := range current {
+                m = strings.TrimSpace(m)
+                if _, ok := upstreamSet[m]; ok {
+                    next = append(next, m)
+                } else {
+                    removed = append(removed, m)
+                }
+            }
+        } else { // replace
+            // 完全替换为上游
+            next = make([]string, 0, len(upstream))
+            currSet := make(map[string]struct{}, len(current))
+            for _, m := range current {
+                currSet[strings.TrimSpace(m)] = struct{}{}
+            }
+            for _, m := range upstream {
+                m = strings.TrimSpace(m)
+                if m != "" {
+                    next = append(next, m)
+                    if _, ok := currSet[m]; !ok {
+                        added = append(added, m)
+                    }
+                }
+            }
+            // 统计被移除的（当前有、上游无）
+            for _, m := range current {
+                m = strings.TrimSpace(m)
+                if m == "" {
+                    continue
+                }
+                if _, ok := upstreamSet[m]; !ok {
+                    removed = append(removed, m)
+                }
+            }
+        }
+
+        // 若本地与新列表一致，则不写库
+        res.AfterCount = len(next)
+        res.RemovedModels = removed
+        res.AddedModels = added
+
+        // 比较是否发生变化
+        equal := func(a, b []string) bool {
+            if len(a) != len(b) {
+                return false
+            }
+            // 有序比较：保持与现有存储格式（逗号分隔）一致，不打乱顺序
+            for i := range a {
+                if strings.TrimSpace(a[i]) != strings.TrimSpace(b[i]) {
+                    return false
+                }
+            }
+            return true
+        }
+
+        if !equal(current, next) {
+            // 预览模式不落库
+            if !req.Preview {
+                ch.Models = strings.Join(next, ",")
+                if e := ch.Update(); e != nil {
+                    res.Error = e.Error()
+                    results = append(results, res)
+                    failed++
+                    common.SysError(fmt.Sprintf("[模型同步] 渠道 %d(%s) 写库失败: %s", ch.Id, ch.Name, e.Error()))
+                    continue
+                }
+                // 刷新该渠道所在分组的前缀缓存
+                middleware.RefreshPrefixChannelsCache(ch.Group)
+            }
+        }
+
+        success++
+        results = append(results, res)
+    }
+
+    resp := SyncResponse{
+        Total:   len(channels),
+        Success: success,
+        Failed:  failed,
+        Mode:    mode,
+        Results: results,
+    }
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": "",
+        "data":    resp,
+    })
+}
+
 func SearchChannels(c *gin.Context) {
 	keyword := c.Query("keyword")
 	group := c.Query("group")
