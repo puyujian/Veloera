@@ -2716,10 +2716,10 @@ const ChannelsTable = () => {
           style={{ marginBottom: 16, display: 'flex', gap: 8 }}
         >
           <Radio value='incremental' style={{ flex: 1, textAlign: 'center' }}>
-            {t('增量同步（仅移除上游已不存在的模型，保留仍有效的本地模型）')}
+            {t('增量同步')}
           </Radio>
           <Radio value='full' style={{ flex: 1, textAlign: 'center' }}>
-            {t('完全同步（使用上游最新模型列表覆盖本地配置）')}
+            {t('完全同步')}
           </Radio>
         </RadioGroup>
 
