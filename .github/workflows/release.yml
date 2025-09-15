@@ -1,0 +1,202 @@
+name: Create Release
+
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - '*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for release (e.g. v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build-linux:
+    name: Build Linux Version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'web/pnpm-lock.yaml'
+      
+      - name: Build Frontend
+        env:
+          CI: ""
+        run: |
+          cd web
+          pnpm install
+          VITE_REACT_APP_VERSION=$(git describe --tags) pnpm run build
+          cd ..
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: '**/go.sum'
+      
+      - name: Build Backend (amd64)
+        run: |
+          go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)' -extldflags '-static'" -o veloera-linux
+      
+      - name: Build Backend (arm64)
+        run: |
+          sudo apt-get update
+          DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)' -extldflags '-static'" -o veloera-linux-arm64
+
+      - name: Upload Linux builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-builds
+          path: |
+            veloera-linux
+            veloera-linux-arm64
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows Version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'web/pnpm-lock.yaml'
+      
+      - name: Build Frontend
+        env:
+          CI: ""
+        run: |
+          cd web
+          pnpm install
+          VITE_REACT_APP_VERSION=$(git describe --tags) pnpm run build
+          cd ..
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: '**/go.sum'
+      
+      - name: Build Backend
+        run: |
+          go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)'" -o veloera-windows.exe
+      
+      - name: Upload Windows builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: veloera-windows.exe
+          retention-days: 1
+
+  build-macos:
+    name: Build macOS Version
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'pnpm'
+          cache-dependency-path: 'web/pnpm-lock.yaml'
+      
+      - name: Build Frontend
+        env:
+          CI: ""
+        run: |
+          cd web
+          pnpm install
+          VITE_REACT_APP_VERSION=$(git describe --tags) pnpm run build
+          cd ..
+      
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache-dependency-path: '**/go.sum'
+      
+      - name: Build Backend
+        run: |
+          go build -ldflags "-X 'veloera/common.Version=$(git describe --tags)'" -o veloera-macos
+      
+      - name: Upload macOS builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: veloera-macos
+          retention-days: 1
+
+  create-release:
+    name: Create and Publish Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        
+      - name: Display downloaded files
+        run: ls -R
+        
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            linux-builds/veloera-linux
+            linux-builds/veloera-linux-arm64
+            windows-builds/veloera-windows.exe
+            macos-builds/veloera-macos
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
