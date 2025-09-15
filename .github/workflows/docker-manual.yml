@@ -99,7 +99,7 @@ jobs:
           tags: |
             type=raw,value=${{ github.event_name == 'push' && 'latest' || inputs.tag || 'latest' }}
             type=raw,value=${{ env.VERSION }}
-            type=sha,prefix={{branch}}-
+            type=sha
 
       - name: 构建并推送 Docker 镜像
         uses: docker/build-push-action@v5
