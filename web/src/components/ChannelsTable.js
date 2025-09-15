@@ -1100,10 +1100,10 @@ const ChannelsTable = () => {
   const [batchSetTagValue, setBatchSetTagValue] = useState('');
   // 批量模型同步弹窗与模式
   const [showSyncModelsModal, setShowSyncModelsModal] = useState(false);
-  const [syncMode, setSyncMode] = useState('incremental'); // incremental | replace
+  const [syncMode, setSyncMode] = useState('incremental'); // incremental | full
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
-  const [syncPreview, setSyncPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [syncEnabledOnly, setSyncEnabledOnly] = useState(false);
   const [syncSelectedOnly, setSyncSelectedOnly] = useState(false);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
@@ -2097,7 +2097,7 @@ const ChannelsTable = () => {
   const syncAllChannelModels = async () => {
     setSyncing(true);
     try {
-      const payload = { mode: syncMode, preview: syncPreview, enabled_only: syncEnabledOnly };
+      const payload = { mode: syncMode, enabled_only: syncEnabledOnly };
       if (syncSelectedOnly && selectedChannels.length > 0) {
         payload.ids = selectedChannels.map(c => c.id);
       }
@@ -2112,14 +2112,41 @@ const ChannelsTable = () => {
       const succ = data?.success || 0;
       const fail = data?.failed || 0;
       showInfo(t('批量模型同步完成：成功 {{succ}}，失败 {{fail}}', { succ, fail }));
-      // 非预览模式下刷新表格
-      if (!syncPreview) {
-        await refresh();
-      }
     } catch (e) {
       showError((e && e.message) ? e.message : t('模型同步失败'));
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // 应用预览结果，保存到后端
+  const applySyncResult = async () => {
+    if (!syncResult || !Array.isArray(syncResult.results)) {
+      return;
+    }
+    const items = syncResult.results
+      ?.filter(r => !r.error && Array.isArray(r.next_models))
+      ?.map(r => ({ channel_id: r.channel_id, next_models: r.next_models })) || [];
+    if (items.length === 0) {
+      showInfo(t('没有可保存的变更'));
+      return;
+    }
+    setApplying(true);
+    try {
+      const res = await API.post('/api/channel/models/apply', { items });
+      const { success, message, data } = res.data || {};
+      if (!success) {
+        showError(message || t('保存失败'));
+        return;
+      }
+      showSuccess(t('保存完成：成功 {{succ}}，失败 {{fail}}', { succ: data?.success || 0, fail: data?.failed || 0 }));
+      await refresh();
+      setShowSyncModelsModal(false);
+      setSyncResult(null);
+    } catch (e) {
+      showError((e && e.message) ? e.message : t('保存失败'));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -2655,12 +2682,26 @@ const ChannelsTable = () => {
         title={t('批量模型同步')}
         visible={showSyncModelsModal}
         onCancel={() => { setShowSyncModelsModal(false); setSyncResult(null); }}
-        onOk={syncAllChannelModels}
-        okText={syncing ? t('同步中...') : t('开始同步')}
-        okButtonProps={{ loading: syncing }}
         maskClosable={false}
         centered={true}
         style={{ width: isMobile() ? '92%' : 720 }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => { setShowSyncModelsModal(false); setSyncResult(null); }}>
+              {t('取消')}
+            </Button>
+            {!syncResult && (
+              <Button type='primary' loading={syncing} onClick={syncAllChannelModels}>
+                {syncing ? t('同步中...') : t('开始同步')}
+              </Button>
+            )}
+            {syncResult && (
+              <Button type='primary' loading={applying} onClick={applySyncResult}>
+                {applying ? t('保存中...') : t('保存变更')}
+              </Button>
+            )}
+          </div>
+        }
       >
         <div style={{ marginBottom: 12 }}>
           <Typography.Text>{t('请选择同步模式')}：</Typography.Text>
@@ -2677,10 +2718,20 @@ const ChannelsTable = () => {
           <Radio value='incremental' style={{ flex: 1, textAlign: 'center' }}>
             {t('增量同步（仅移除上游已不存在的模型，保留仍有效的本地模型）')}
           </Radio>
-          <Radio value='replace' style={{ flex: 1, textAlign: 'center' }}>
-            {t('完全替换（使用上游最新模型列表覆盖本地配置）')}
+          <Radio value='full' style={{ flex: 1, textAlign: 'center' }}>
+            {t('完全同步（使用上游最新模型列表覆盖本地配置）')}
           </Radio>
         </RadioGroup>
+
+        <div style={{ marginBottom: 12 }}>
+          <Typography.Text type='tertiary'>
+            {t('模式说明：')}
+          </Typography.Text>
+          <div style={{ marginTop: 4, lineHeight: 1.6 }}>
+            <div>• {t('增量同步：仅移除上游已不存在的模型，不新增。')}</div>
+            <div>• {t('完全同步：以上游模型为准，覆盖本地并同步新增与移除。')}</div>
+          </div>
+        </div>
 
         <div style={{ margin: '8px 0 12px 0' }}>
           <Typography.Text>{t('同步范围')}</Typography.Text>
@@ -2696,9 +2747,7 @@ const ChannelsTable = () => {
           >
             {t('仅同步所选通道（已选 {{count}} 个）', { count: selectedChannels.length })}
           </Checkbox>
-          <Checkbox checked={syncPreview} onChange={(e) => setSyncPreview(!!e?.target?.checked)}>
-            {t('预览模式（仅展示差异，不写入数据库）')}
-          </Checkbox>
+
         </div>
 
         <Typography.Text type='tertiary'>
