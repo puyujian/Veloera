@@ -290,11 +290,6 @@ func SyncChannelModelsV2(c *gin.Context) {
             }
             res.UpstreamCount = len(upstream)
             res.UpstreamPreview = upstream
-            if len(upstream) == 0 {
-                res.Error = "上游返回空模型列表，已跳过"
-                done <- res
-                return
-            }
             upstreamSet := make(map[string]struct{}, len(upstream))
             for _, m := range upstream {
                 if mm := strings.TrimSpace(m); mm != "" {
