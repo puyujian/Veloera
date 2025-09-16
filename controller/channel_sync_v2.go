@@ -186,8 +186,8 @@ func SyncChannelModelsV2(c *gin.Context) {
     buildModelsURL := func(ch *model.Channel) string {
         baseURL := strings.TrimSpace(ch.GetBaseURL())
         if baseURL == "" {
-            if fallback, ok := common.ChannelBaseURLs[ch.Type]; ok {
-                baseURL = strings.TrimSpace(fallback)
+            if ch.Type < len(common.ChannelBaseURLs) && common.ChannelBaseURLs[ch.Type] != "" {
+                baseURL = strings.TrimSpace(common.ChannelBaseURLs[ch.Type])
             }
         }
         if baseURL == "" {
