@@ -211,7 +211,7 @@ const SiderBar = () => {
   const financeItems = useMemo(
     () => [
       {
-        text: t('钱包'),
+        text: t('计费与订阅'),
         itemKey: 'topup',
         to: '/app/wallet',
         icon: <IconCreditCard />,
