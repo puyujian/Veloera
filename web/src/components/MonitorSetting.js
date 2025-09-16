@@ -29,15 +29,9 @@ const MonitorSetting = () => {
     LogConsumeEnabled: false,
     LogChatContentEnabled: false,
     LogErrorEnabled: false,
-    DisplayInCurrencyEnabled: false,
-    DisplayTokenStatEnabled: false,
     DataExportEnabled: false,
     DataExportDefaultTime: 'hour',
     DataExportInterval: 5,
-    AutomaticDisableChannelEnabled: false,
-    AutomaticEnableChannelEnabled: false,
-    ChannelDisableThreshold: 0,
-    AutomaticDisableKeywords: '',
   });
 
   let [loading, setLoading] = useState(false);

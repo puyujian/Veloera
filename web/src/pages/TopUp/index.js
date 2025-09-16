@@ -328,14 +328,14 @@ const TopUp = () => {
                   {topUpLink && (
                       <Button
                           type="primary"
-                          theme="solid"
+                          theme='borderless'
                           onClick={openTopUpLink}
                       >
                           {t('获取兑换码')}
                       </Button>
                   )}
                   <Button
-                      type="warning"
+                      type="primary"
                       theme="solid"
                       onClick={() => {
                           topUp();
