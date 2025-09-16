@@ -227,6 +227,11 @@ const Home = () => {
               src={homePageContent}
               style={{ width: '100%', height: '100vh', border: 'none' }}
             />
+          ) : homePageContent.trim().startsWith('<!DOCTYPE') ? (
+            <iframe
+              srcDoc={homePageContent}
+              style={{ width: '100%', height: '100vh', border: 'none' }}
+            />
           ) : (
             <div
               style={{ fontSize: 'larger' }}
