@@ -4,6 +4,8 @@ import (
     "encoding/json"
     "fmt"
     "net/http"
+    "net/url"
+    "path"
     "strings"
     "veloera/common"
     "veloera/middleware"
@@ -182,13 +184,54 @@ func SyncChannelModelsV2(c *gin.Context) {
 
     // 构建上游 URL
     buildModelsURL := func(ch *model.Channel) string {
-        baseURL := common.ChannelBaseURLs[ch.Type]
-        if ch.GetBaseURL() != "" { baseURL = ch.GetBaseURL() }
-        url := fmt.Sprintf("%s/v1/models", baseURL)
-        if strings.HasSuffix(baseURL, "/chat/completions") { url = strings.TrimSuffix(baseURL, "/chat/completions") + "/models" }
-        if ch.Type == common.ChannelTypeGemini { url = fmt.Sprintf("%s/v1beta/openai/models", baseURL) }
-        if ch.Type == common.ChannelTypeGitHub { url = strings.Replace(baseURL, "/inference", "/catalog/models", 1) }
-        return url
+        baseURL := strings.TrimSpace(ch.GetBaseURL())
+        if baseURL == "" {
+            if fallback, ok := common.ChannelBaseURLs[ch.Type]; ok {
+                baseURL = strings.TrimSpace(fallback)
+            }
+        }
+        if baseURL == "" {
+            return ""
+        }
+        baseURL = strings.TrimRight(baseURL, "/")
+
+        safeJoin := func(base string, segments ...string) string {
+            parsed, err := url.Parse(base)
+            if err != nil {
+                trimmed := strings.TrimRight(base, "/")
+                if trimmed == "" {
+                    return ""
+                }
+                return trimmed + "/" + strings.Join(segments, "/")
+            }
+            joined := append([]string{parsed.Path}, segments...)
+            parsed.Path = path.Join(joined...)
+            return parsed.String()
+        }
+
+        switch ch.Type {
+        case common.ChannelTypeGemini:
+            return safeJoin(baseURL, "v1beta", "openai", "models")
+        case common.ChannelTypeGitHub:
+            parsed, err := url.Parse(baseURL)
+            if err != nil {
+                trimmed := strings.TrimRight(baseURL, "/")
+                trimmed = strings.TrimSuffix(trimmed, "/inference")
+                trimmed = strings.TrimRight(trimmed, "/")
+                if trimmed == "" {
+                    return ""
+                }
+                return trimmed + "/catalog/models"
+            }
+            cleanedPath := strings.TrimSuffix(parsed.Path, "/")
+            if strings.HasSuffix(cleanedPath, "/inference") {
+                cleanedPath = strings.TrimSuffix(cleanedPath, "/inference")
+            }
+            parsed.Path = path.Join(cleanedPath, "catalog", "models")
+            return parsed.String()
+        default:
+            return safeJoin(baseURL, "v1", "models")
+        }
     }
     // 拉取上游模型 ID 列表
     fetchUpstream := func(ch *model.Channel) ([]string, error) {
