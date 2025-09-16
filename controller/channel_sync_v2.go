@@ -12,6 +12,93 @@ import (
     "github.com/gin-gonic/gin"
 )
 
+
+var unsafeRedirectModelKeys = map[string]struct{}{
+    "__proto__":   {},
+    "prototype":   {},
+    "constructor": {},
+}
+
+type channelRedirectMapping struct {
+    aliasToActual map[string]string
+    actualToAlias map[string]string
+}
+
+func buildChannelRedirectMapping(ch *model.Channel) *channelRedirectMapping {
+    if ch == nil || ch.ModelMapping == nil {
+        return nil
+    }
+    raw := strings.TrimSpace(*ch.ModelMapping)
+    if raw == "" || raw == "{}" {
+        return nil
+    }
+
+    tmp := make(map[string]interface{})
+    if err := json.Unmarshal([]byte(raw), &tmp); err != nil {
+        common.SysError(fmt.Sprintf("[模型同步] 渠道 %d(%s) 模型重定向解析失败: %v", ch.Id, ch.Name, err))
+        return nil
+    }
+
+    aliasToActual := make(map[string]string, len(tmp))
+    actualToAlias := make(map[string]string, len(tmp))
+    for alias, value := range tmp {
+        trimmedAlias := strings.TrimSpace(alias)
+        if trimmedAlias == "" {
+            continue
+        }
+        if _, blocked := unsafeRedirectModelKeys[trimmedAlias]; blocked {
+            continue
+        }
+
+        actual := ""
+        switch v := value.(type) {
+        case string:
+            actual = strings.TrimSpace(v)
+        default:
+            continue
+        }
+        if actual == "" {
+            continue
+        }
+
+        aliasToActual[trimmedAlias] = actual
+        if _, exists := actualToAlias[actual]; !exists {
+            actualToAlias[actual] = trimmedAlias
+        }
+    }
+
+    if len(aliasToActual) == 0 {
+        return nil
+    }
+
+    return &channelRedirectMapping{
+        aliasToActual: aliasToActual,
+        actualToAlias: actualToAlias,
+    }
+}
+
+func (m *channelRedirectMapping) resolveActual(name string) string {
+    trimmed := strings.TrimSpace(name)
+    if trimmed == "" {
+        return ""
+    }
+    if actual, ok := m.aliasToActual[trimmed]; ok && actual != "" {
+        return actual
+    }
+    return trimmed
+}
+
+func (m *channelRedirectMapping) resolveDisplay(actual string) string {
+    trimmed := strings.TrimSpace(actual)
+    if trimmed == "" {
+        return ""
+    }
+    if alias, ok := m.actualToAlias[trimmed]; ok && alias != "" {
+        return alias
+    }
+    return trimmed
+}
+
 // SyncChannelModelsV2：并发抓取上游，仅返回预览结果，不落库
 func SyncChannelModelsV2(c *gin.Context) {
     type SyncRequest struct {
@@ -166,31 +253,162 @@ func SyncChannelModelsV2(c *gin.Context) {
                 return
             }
             upstreamSet := make(map[string]struct{}, len(upstream))
-            for _, m := range upstream { if mm := strings.TrimSpace(m); mm != "" { upstreamSet[mm] = struct{}{} } }
+            for _, m := range upstream {
+                if mm := strings.TrimSpace(m); mm != "" {
+                    upstreamSet[mm] = struct{}{}
+                }
+            }
 
             var next []string
             removed := make([]string, 0)
             added := make([]string, 0)
+            redirectMapping := buildChannelRedirectMapping(ch)
+
+            var seenNext map[string]struct{}
+            var addedSet map[string]struct{}
+            var removedSet map[string]struct{}
+            if redirectMapping != nil {
+                seenNext = make(map[string]struct{})
+                addedSet = make(map[string]struct{})
+                removedSet = make(map[string]struct{})
+            }
+
+            normalizeName := func(name string) string {
+                trimmed := strings.TrimSpace(name)
+                if trimmed == "" {
+                    return ""
+                }
+                if redirectMapping != nil {
+                    if actual := redirectMapping.resolveActual(trimmed); actual != "" {
+                        return actual
+                    }
+                }
+                return trimmed
+            }
+            displayName := func(actual string) string {
+                trimmed := strings.TrimSpace(actual)
+                if trimmed == "" {
+                    return ""
+                }
+                if redirectMapping != nil {
+                    if alias := redirectMapping.resolveDisplay(trimmed); alias != "" {
+                        return alias
+                    }
+                }
+                return trimmed
+            }
+            appendNext := func(name string) {
+                if name == "" {
+                    return
+                }
+                if seenNext != nil {
+                    if _, exists := seenNext[name]; exists {
+                        return
+                    }
+                    seenNext[name] = struct{}{}
+                }
+                next = append(next, name)
+            }
+            appendAdded := func(name string) {
+                if name == "" {
+                    return
+                }
+                if addedSet != nil {
+                    if _, exists := addedSet[name]; exists {
+                        return
+                    }
+                    addedSet[name] = struct{}{}
+                }
+                added = append(added, name)
+            }
+            appendRemoved := func(name string) {
+                if name == "" {
+                    return
+                }
+                if removedSet != nil {
+                    if _, exists := removedSet[name]; exists {
+                        return
+                    }
+                    removedSet[name] = struct{}{}
+                }
+                removed = append(removed, name)
+            }
+
             if mode == "incremental" {
                 for _, m := range current {
-                    m = strings.TrimSpace(m)
-                    if _, ok := upstreamSet[m]; ok { next = append(next, m) } else { removed = append(removed, m) }
+                    trimmed := strings.TrimSpace(m)
+                    if trimmed == "" {
+                        continue
+                    }
+                    actualName := normalizeName(trimmed)
+                    if actualName == "" {
+                        actualName = trimmed
+                    }
+                    if _, ok := upstreamSet[actualName]; ok {
+                        nameForNext := trimmed
+                        if redirectMapping != nil {
+                            if candidate := displayName(actualName); candidate != "" {
+                                nameForNext = candidate
+                            }
+                        }
+                        appendNext(strings.TrimSpace(nameForNext))
+                    } else {
+                        nameForRemoved := trimmed
+                        if redirectMapping != nil {
+                            if candidate := displayName(actualName); candidate != "" {
+                                nameForRemoved = candidate
+                            }
+                        }
+                        appendRemoved(strings.TrimSpace(nameForRemoved))
+                    }
                 }
             } else { // full
-                next = make([]string, 0, len(upstream))
-                currSet := make(map[string]struct{}, len(current))
-                for _, m := range current { currSet[strings.TrimSpace(m)] = struct{}{} }
+                currActualSet := make(map[string]struct{}, len(current))
+                for _, m := range current {
+                    trimmed := strings.TrimSpace(m)
+                    if trimmed == "" {
+                        continue
+                    }
+                    actualName := normalizeName(trimmed)
+                    if actualName == "" {
+                        actualName = trimmed
+                    }
+                    currActualSet[actualName] = struct{}{}
+                }
                 for _, m := range upstream {
-                    m = strings.TrimSpace(m)
-                    if m != "" {
-                        next = append(next, m)
-                        if _, ok := currSet[m]; !ok { added = append(added, m) }
+                    actualName := strings.TrimSpace(m)
+                    if actualName == "" {
+                        continue
+                    }
+                    nameForNext := actualName
+                    if redirectMapping != nil {
+                        if candidate := displayName(actualName); candidate != "" {
+                            nameForNext = candidate
+                        }
+                    }
+                    appendNext(strings.TrimSpace(nameForNext))
+                    if _, ok := currActualSet[actualName]; !ok {
+                        appendAdded(strings.TrimSpace(nameForNext))
                     }
                 }
                 for _, m := range current {
-                    m = strings.TrimSpace(m)
-                    if m == "" { continue }
-                    if _, ok := upstreamSet[m]; !ok { removed = append(removed, m) }
+                    trimmed := strings.TrimSpace(m)
+                    if trimmed == "" {
+                        continue
+                    }
+                    actualName := normalizeName(trimmed)
+                    if actualName == "" {
+                        actualName = trimmed
+                    }
+                    if _, ok := upstreamSet[actualName]; !ok {
+                        nameForRemoved := trimmed
+                        if redirectMapping != nil {
+                            if candidate := displayName(actualName); candidate != "" {
+                                nameForRemoved = candidate
+                            }
+                        }
+                        appendRemoved(strings.TrimSpace(nameForRemoved))
+                    }
                 }
             }
             res.AfterCount = len(next)
