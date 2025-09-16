@@ -2738,15 +2738,15 @@ const ChannelsTable = () => {
         >
           <Radio
             value='incremental'
-            style={{ flex: 1, display: 'flex' }}
-            addonStyle={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+            style={{ flex: 1, display: 'flex', minWidth: 0 }}
+            addonStyle={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '32px', padding: '0 16px' }}
           >
             {t('增量同步')}
           </Radio>
           <Radio
             value='full'
-            style={{ flex: 1, display: 'flex' }}
-            addonStyle={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}
+            style={{ flex: 1, display: 'flex', minWidth: 0 }}
+            addonStyle={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '32px', padding: '0 16px' }}
           >
             {t('完全同步')}
           </Radio>
