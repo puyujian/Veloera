@@ -26,6 +26,7 @@ import {
   Modal,
   Space,
   Card,
+  Switch,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, timestamp2string } from '../helpers';
 import { marked } from 'marked';
@@ -45,6 +46,8 @@ const UISetting = () => {
     custom_head_html: '',
     global_css: '',
     global_js: '',
+    DisplayInCurrencyEnabled: false,
+    DisplayTokenStatEnabled: false,
   });
   let [loading, setLoading] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -262,7 +265,11 @@ const UISetting = () => {
       let newInputs = {};
       data.forEach((item) => {
         if (item.key in inputs) {
-          newInputs[item.key] = item.value;
+          if (item.key === 'DisplayInCurrencyEnabled' || item.key === 'DisplayTokenStatEnabled') {
+            newInputs[item.key] = item.value === 'true';
+          } else {
+            newInputs[item.key] = item.value;
+          }
         }
       });
       setInputs(newInputs);
@@ -470,6 +477,30 @@ const UISetting = () => {
               <Button onClick={submitGlobalJs} loading={loadingInput['global_js']}>
                 {t('设置全局 JavaScript 代码')}
               </Button>
+            </Form.Section>
+            <Form.Section text={t('显示设置')}>
+              <Space vertical align='start' style={{ width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Switch
+                    checked={inputs.DisplayInCurrencyEnabled}
+                    onChange={async (checked) => {
+                      setInputs({ ...inputs, DisplayInCurrencyEnabled: checked });
+                      await updateOption('DisplayInCurrencyEnabled', checked.toString());
+                    }}
+                  />
+                  <Text>{t('以货币形式显示配额')}</Text>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Switch
+                    checked={inputs.DisplayTokenStatEnabled}
+                    onChange={async (checked) => {
+                      setInputs({ ...inputs, DisplayTokenStatEnabled: checked });
+                      await updateOption('DisplayTokenStatEnabled', checked.toString());
+                    }}
+                  />
+                  <Text>{t('显示 Token 统计信息')}</Text>
+                </div>
+              </Space>
             </Form.Section>
           </Card>
         </Form>

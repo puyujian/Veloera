@@ -23,6 +23,11 @@ import SettingsCheckIn from '../pages/Setting/Operation/SettingsCheckIn.js';
 import SettingsCreditLimit from '../pages/Setting/Operation/SettingsCreditLimit.js';
 import SettingsRebate from '../pages/Setting/Operation/SettingsRebate.js';
 import PaymentSetting from './PaymentSetting.js';
+import ModelRatioSettings from '../pages/Setting/Operation/ModelRatioSettings.js';
+import GroupRatioSettings from '../pages/Setting/Operation/GroupRatioSettings.js';
+import ModelCommonRatioSettings from '../pages/Setting/Operation/ModelCommonRatioSettings.js';
+import ModelSettingsVisualEditor from '../pages/Setting/Operation/ModelSettingsVisualEditor.js';
+import ModelRatioNotSetEditor from '../pages/Setting/Operation/ModelRationNotSetEditor.js';
 import { API, showError } from '../helpers';
 
 const BusinessSetting = () => {
@@ -33,6 +38,12 @@ const BusinessSetting = () => {
     QuotaRemindThreshold: 0,
     PreConsumedQuota: 0,
     StreamCacheQueueLength: 0,
+    ModelRatio: '',
+    CacheRatio: '',
+    CompletionRatio: '',
+    ModelPrice: '',
+    GroupRatio: '',
+    UserUsableGroups: '',
     TopUpLink: '',
     'general_setting.docs_link': '',
     QuotaPerUnit: 0,
@@ -57,6 +68,8 @@ const BusinessSetting = () => {
     MinTopUp: 1,
     TopupGroupRatio: '',
     CustomCallbackAddress: '',
+    DisplayInCurrencyEnabled: false,
+    DisplayTokenStatEnabled: false,
   });
 
   let [loading, setLoading] = useState(false);
@@ -69,6 +82,9 @@ const BusinessSetting = () => {
       data.forEach((item) => {
         if (item.key in inputs) {
           if (item.key === 'TopupGroupRatio') {
+            item.value = JSON.stringify(JSON.parse(item.value), null, 2);
+          }
+          if (item.key === 'ModelRatio' || item.key === 'GroupRatio' || item.key === 'CompletionRatio' || item.key === 'ModelPrice') {
             item.value = JSON.stringify(JSON.parse(item.value), null, 2);
           }
           if (
@@ -111,6 +127,26 @@ const BusinessSetting = () => {
         </Card>
         
         <PaymentSetting />
+        
+        <Card style={{ marginTop: '10px' }}>
+          <ModelSettingsVisualEditor options={inputs} refresh={onRefresh} />
+        </Card>
+        
+        <Card style={{ marginTop: '10px' }}>
+          <ModelRatioSettings options={inputs} refresh={onRefresh} />
+        </Card>
+        
+        <Card style={{ marginTop: '10px' }}>
+          <ModelCommonRatioSettings options={inputs} refresh={onRefresh} />
+        </Card>
+        
+        <Card style={{ marginTop: '10px' }}>
+          <GroupRatioSettings options={inputs} refresh={onRefresh} />
+        </Card>
+        
+        <Card style={{ marginTop: '10px' }}>
+          <ModelRatioNotSetEditor />
+        </Card>
         
         <Card style={{ marginTop: '10px' }}>
           <SettingsCheckIn options={inputs} refresh={onRefresh} />
