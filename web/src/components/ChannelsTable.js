@@ -2107,6 +2107,13 @@ const ChannelsTable = () => {
         concurrency
       };
 
+      // 防止意外全局同步：当选择"仅同步所选通道"但未选中任何通道时
+      if (syncSelectedOnly && selectedChannels.length === 0) {
+        showError(t('请先选择要同步的通道'));
+        setSyncing(false);
+        return;
+      }
+
       if (syncSelectedOnly && selectedChannels.length > 0) {
         // 过滤出只有数字 ID 的通道
         const validChannels = selectedChannels.filter(c =>
