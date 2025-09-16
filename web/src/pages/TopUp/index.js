@@ -41,6 +41,8 @@ import {
   Banner,
   RadioGroup,
   Radio,
+  Row,
+  Col,
 } from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import { useTranslation } from 'react-i18next';
@@ -308,6 +310,9 @@ const TopUp = () => {
 
   return (
     <Layout>
+        <Layout.Header>
+            <h3>计费与订阅</h3>
+        </Layout.Header>
       <Layout.Content>
 
         {/* 兑换码弹窗 */}
@@ -454,6 +459,18 @@ const TopUp = () => {
                       </td>
                     </tr>
                   </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: '2px solid var(--semi-color-border)' }}>
+                      <td style={{ padding: '16px 12px', fontWeight: 'bold' }}>
+                        {t('总计')}
+                      </td>
+                      <td style={{ padding: '16px 12px' }}>
+                      </td>
+                      <td style={{ padding: '16px 12px', textAlign: 'right', fontWeight: 'bold', fontSize: '18px', color: 'var(--semi-color-primary)' }}>
+                        ￥{amount.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
                 
                 <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--semi-color-border)' }}>
@@ -565,27 +582,48 @@ const TopUp = () => {
         {/* 主界面内容 */}
         <div
           style={{
-            padding: '2rem',
+            padding: '4rem',
             maxWidth: '100%',
             '@media (max-width: 768px)': {
               padding: '1rem',
             },
           }}
         >
-          <div style={{ marginBottom: '1rem' }}>
-            <span style={{ fontSize: '1rem', color: 'var(--semi-color-text-1)' }}>
-              当前余额
-            </span>
-          </div>
-          
-          <h2 style={{ 
-            fontSize: '2rem', 
-            fontWeight: 'bold',
-            margin: '0 0 1.5rem 0',
-            color: 'var(--semi-color-text-0)'
-          }}>
-            {formatQuotaAsCurrency(userQuota)}
-          </h2>
+          <Row gutter={[32, 32]}>
+            <Col span={12}>
+              <div style={{ marginBottom: '1rem' }}>
+                <span style={{ fontSize: '1rem', color: 'var(--semi-color-text-1)' }}>
+                  当前余额
+                </span>
+              </div>
+              
+              <h2 style={{ 
+                fontSize: '2rem', 
+                fontWeight: 'bold',
+                margin: '0 0 1.5rem 0',
+                color: 'var(--semi-color-text-0)'
+              }}>
+                {formatQuotaAsCurrency(userQuota)}
+              </h2>
+            </Col>
+            
+            <Col span={12}>
+              <div style={{ marginBottom: '1rem' }}>
+                <span style={{ fontSize: '1rem', color: 'var(--semi-color-text-1)' }}>
+                  当前计划
+                </span>
+              </div>
+              
+              <h2 style={{ 
+                fontSize: '2rem', 
+                fontWeight: 'bold',
+                margin: '0 0 1.5rem 0',
+                color: 'var(--semi-color-text-0)'
+              }}>
+                即用即付
+              </h2>
+            </Col>
+          </Row>
 
           <Space wrap>
             <Button
