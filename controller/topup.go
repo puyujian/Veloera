@@ -285,5 +285,15 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(200, gin.H{"message": "error", "data": "充值金额过低"})
 		return
 	}
-	c.JSON(200, gin.H{"message": "success", "data": strconv.FormatFloat(payMoney, 'f', 2, 64)})
+
+	// 计算单价（每美元的价格）
+	unitPrice := payMoney / float64(req.Amount)
+
+	c.JSON(200, gin.H{
+		"message": "success",
+		"data": gin.H{
+			"amount":     strconv.FormatFloat(payMoney, 'f', 2, 64),
+			"unit_price": strconv.FormatFloat(unitPrice, 'f', 4, 64),
+		},
+	})
 }

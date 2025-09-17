@@ -139,11 +139,38 @@ func GetMidjourney(c *gin.Context) {
 
 func GetHomePageContent(c *gin.Context) {
 	common.OptionMapRWMutex.RLock()
-	defer common.OptionMapRWMutex.RUnlock()
+	content := common.OptionMap["HomePageContent"]
+	common.OptionMapRWMutex.RUnlock()
+
+	// For HTML content starting with <!DOCTYPE, we need to prevent JSON encoding from escaping HTML
+	// Check if it's a complete HTML document
+	if strings.HasPrefix(strings.TrimSpace(content), "<!DOCTYPE") || strings.HasPrefix(strings.TrimSpace(content), "<html") {
+		// Use custom JSON encoder that doesn't escape HTML
+		response := map[string]interface{}{
+			"success": true,
+			"message": "",
+			"data":    content,
+		}
+
+		encoder := json.NewEncoder(c.Writer)
+		encoder.SetEscapeHTML(false) // Don't escape HTML characters
+		c.Header("Content-Type", "application/json")
+		c.Status(http.StatusOK)
+		if err := encoder.Encode(response); err != nil {
+			// Fallback to regular JSON if encoding fails
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Failed to encode response",
+			})
+		}
+		return
+	}
+
+	// For non-HTML content, use regular JSON encoding
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    common.OptionMap["HomePageContent"],
+		"data":    content,
 	})
 	return
 }

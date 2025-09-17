@@ -97,7 +97,7 @@ const TopUpSuccess = () => {
                 onClick={handleBackToWallet}
                 size="large"
               >
-                {t('返回钱包')}
+                {t('返回计费页面')}
               </Button>
               <Button 
                 type="tertiary"

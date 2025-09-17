@@ -52,7 +52,7 @@ const Home = () => {
     const { success, message, data } = res.data;
     if (success) {
       let content = data;
-      if (!data.startsWith('https://')) {
+      if (!data.startsWith('https://') && !data.startsWith('<!DOCTYPE')) {
         content = marked.parse(data);
       }
       setHomePageContent(content);
@@ -225,6 +225,11 @@ const Home = () => {
           {homePageContent.startsWith('https://') ? (
             <iframe
               src={homePageContent}
+              style={{ width: '100%', height: '100vh', border: 'none' }}
+            />
+          ) : homePageContent.trim().startsWith('<!DOCTYPE') ? (
+            <iframe
+              srcDoc={homePageContent}
               style={{ width: '100%', height: '100vh', border: 'none' }}
             />
           ) : (
