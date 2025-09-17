@@ -52,7 +52,7 @@ const Home = () => {
     const { success, message, data } = res.data;
     if (success) {
       let content = data;
-      if (!data.startsWith('https://')) {
+      if (!data.startsWith('https://') && !data.startsWith('<!DOCTYPE')) {
         content = marked.parse(data);
       }
       setHomePageContent(content);
