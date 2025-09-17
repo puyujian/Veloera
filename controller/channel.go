@@ -17,16 +17,17 @@
 package controller
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"strconv"
-	"strings"
-	"veloera/common"
-	"veloera/middleware"
-	"veloera/model"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "strconv"
+    "strings"
+    "time"
+    "veloera/common"
+    "veloera/middleware"
+    "veloera/model"
 
-	"github.com/gin-gonic/gin"
+    "github.com/gin-gonic/gin"
 )
 
 type OpenAIModel struct {
@@ -227,6 +228,7 @@ func FixChannelsAbilities(c *gin.Context) {
 		"data":    count,
 	})
 }
+
 
 func SearchChannels(c *gin.Context) {
 	keyword := c.Query("keyword")
@@ -694,7 +696,12 @@ func FetchModels(c *gin.Context) {
 		baseURL = common.ChannelBaseURLs[req.Type]
 	}
 
-	client := &http.Client{}
+    // 为 HTTP 客户端设置非零超时，避免请求无限阻塞
+    timeout := time.Duration(common.RelayTimeout) * time.Second
+    if timeout == 0 {
+        timeout = 30 * time.Second
+    }
+    client := &http.Client{Timeout: timeout}
 	url := fmt.Sprintf("%s/v1/models", baseURL)
 
 	if strings.HasSuffix(baseURL, "/chat/completions") {

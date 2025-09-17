@@ -31,13 +31,12 @@ var httpClient *http.Client
 var impatientHTTPClient *http.Client
 
 func init() {
-	if common.RelayTimeout == 0 {
-		httpClient = &http.Client{}
-	} else {
-		httpClient = &http.Client{
-			Timeout: time.Duration(common.RelayTimeout) * time.Second,
-		}
+	// 统一为 httpClient 设置非零超时；未配置时默认 30s
+	timeout := time.Duration(common.RelayTimeout) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
 	}
+	httpClient = &http.Client{Timeout: timeout}
 
 	impatientHTTPClient = &http.Client{
 		Timeout: 5 * time.Second,
@@ -54,8 +53,14 @@ func GetImpatientHttpClient() *http.Client {
 
 // NewProxyHttpClient 创建支持代理的 HTTP 客户端
 func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
+	// 统一超时策略：优先使用 RelayTimeout，否则回退到 30s
+	timeout := time.Duration(common.RelayTimeout) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
 	if proxyURL == "" {
-		return http.DefaultClient, nil
+		// 不使用代理时，复用全局客户端，保持统一超时
+		return httpClient, nil
 	}
 
 	parsedURL, err := url.Parse(proxyURL)
@@ -66,6 +71,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 	switch parsedURL.Scheme {
 	case "http", "https":
 		return &http.Client{
+			Timeout: timeout,
 			Transport: &http.Transport{
 				Proxy: http.ProxyURL(parsedURL),
 			},
@@ -91,6 +97,7 @@ func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
 		}
 
 		return &http.Client{
+			Timeout: timeout,
 			Transport: &http.Transport{
 				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 					return dialer.Dial(network, addr)
