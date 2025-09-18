@@ -97,7 +97,7 @@ func (user *User) GetShowIPInLogs() bool {
 	if settings == nil {
 		return false
 	}
-	
+
 	if showIP, exists := settings["show_ip_in_logs"]; exists {
 		if boolVal, ok := showIP.(bool); ok {
 			return boolVal
@@ -286,20 +286,35 @@ func HardDeleteUserById(id int) error {
 }
 
 func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+	// 始终更新邀请统计，不管奖励是否为0
+	updateFields := map[string]interface{}{
+		"aff_count": gorm.Expr("aff_count + ?", 1),
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+
+	// 只有当奖励大于0时才更新奖励相关字段
+	if common.QuotaForInviter > 0 {
+		updateFields["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
+		updateFields["aff_history_quota"] = gorm.Expr("aff_history_quota + ?", common.QuotaForInviter)
+	}
+
+	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(updateFields)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	// 检查是否找到了用户
+	if result.RowsAffected == 0 {
+		return errors.New("邀请者用户不存在")
+	}
+
+	return nil
 }
 
 // ProcessRebate 处理返佣逻辑
 func ProcessRebate(userId int, amount int, rebateType string) error {
-	// 检查返佣功能是否启用
-	if !common.RebateEnabled || common.RebatePercentage <= 0 {
+	// 检查邀请功能和返佣功能是否启用
+	if !common.AffEnabled || !common.RebateEnabled || common.RebatePercentage <= 0 {
 		return nil
 	}
 
@@ -381,27 +396,70 @@ func (user *User) Insert(inviterId int) error {
 		}
 	}
 	user.Quota = common.QuotaForNewUser
-	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
-	result := DB.Create(user)
+
+	// 开始数据库事务
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer tx.Rollback() // 确保在函数退出时能回滚未提交的事务
+
+	// 创建用户
+	result := tx.Create(user)
 	if result.Error != nil {
 		return result.Error
 	}
+
+	// 记录新用户注册日志
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", common.LogQuota(common.QuotaForNewUser)))
 	}
-	if inviterId != 0 {
+
+	// 处理邀请逻辑 - 检查邀请功能是否启用
+	if inviterId != 0 && common.AffEnabled {
+		// 给被邀请者增加额度（如果配置了奖励）
 		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
+			err = tx.Model(&User{}).Where("id = ?", user.Id).Update("quota", gorm.Expr("quota + ?", common.QuotaForInvitee)).Error
+			if err != nil {
+				return err
+			}
 			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", common.LogQuota(common.QuotaForInvitee)))
 		}
+
+		// 始终更新邀请者统计，不管奖励是否为0
+		updateFields := map[string]interface{}{
+			"aff_count": gorm.Expr("aff_count + ?", 1),
+		}
+
+		// 只有当奖励大于0时才更新奖励相关字段
 		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
+			updateFields["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
+			updateFields["aff_history_quota"] = gorm.Expr("aff_history_quota + ?", common.QuotaForInviter)
+		}
+
+		// 在事务内原子更新邀请者信息
+		result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(updateFields)
+
+		if result.Error != nil {
+			return result.Error
+		}
+
+		// 检查是否找到了邀请者用户
+		if result.RowsAffected == 0 {
+			return errors.New("邀请者用户不存在")
+		}
+
+		// 记录日志（不管奖励是否为0都记录邀请事件）
+		if common.QuotaForInviter > 0 {
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", common.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+		} else {
+			RecordLog(inviterId, LogTypeSystem, "成功邀请新用户注册")
 		}
 	}
-	return nil
+
+	// 提交事务
+	return tx.Commit().Error
 }
 
 func (user *User) Update(updatePassword bool) error {
@@ -729,7 +787,7 @@ func GetUserShowIPInLogs(id int, fromDB bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	
+
 	if showIP, exists := settings["show_ip_in_logs"]; exists {
 		if boolVal, ok := showIP.(bool); ok {
 			return boolVal, nil
@@ -992,7 +1050,7 @@ func applyAndSaveCheckIn(tx *gorm.DB, user *User, reward int) error {
 	}
 
 	// Record this activity in log
-RecordLog(user.Id, LogTypeCheckIn, fmt.Sprintf("签到奖励 %s", common.LogQuota(reward)))
+	RecordLog(user.Id, LogTypeCheckIn, fmt.Sprintf("签到奖励 %s", common.LogQuota(reward)))
 
 	return nil
 }
