@@ -36,9 +36,9 @@ type Redemption struct {
 	Quota        int            `json:"quota" gorm:"default:100"`
 	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
 	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
-	ValidFrom    int64          `json:"valid_from" gorm:"bigint;default:0"`    // 生效时间，0表示立即生效
-	ValidUntil   int64          `json:"valid_until" gorm:"bigint;default:0"`   // 过期时间，0表示永不过期
-	Count        int            `json:"count" gorm:"-:all"` // only for api request
+	ValidFrom    int64          `json:"valid_from" gorm:"bigint;default:0"`  // 生效时间，0表示立即生效
+	ValidUntil   int64          `json:"valid_until" gorm:"bigint;default:0"` // 过期时间，0表示永不过期
+	Count        int            `json:"count" gorm:"-:all"`                  // only for api request
 	UsedUserId   int            `json:"used_user_id"`
 	IsGift       bool           `json:"is_gift" gorm:"default:false"`
 	MaxUses      int            `json:"max_uses" gorm:"default:-1"` // -1 means unlimited
@@ -252,13 +252,6 @@ func Redeem(key string, userId int) (quota int, isGift bool, err error) {
 		common.LogQuota(redemption.Quota),
 		redemption.Id))
 
-	// 处理返佣逻辑
-	rebateType := map[bool]string{true: "礼品码", false: "兑换码"}[redemption.IsGift]
-	err = ProcessRebate(userId, redemption.Quota, rebateType)
-	if err != nil {
-		common.SysError("处理兑换码返佣失败: " + err.Error())
-	}
-
 	return redemption.Quota, redemption.IsGift, nil
 }
 
@@ -341,7 +334,7 @@ func BatchDisableRedemptions(ids []int) (count int64, err error) {
 
 // DeleteDisabledRedemptions 删除所有已禁用的兑换码
 func DeleteDisabledRedemptions() (count int64, err error) {
-    // Delete both disabled and already used redemption codes
-    result := DB.Where("status IN ?", []int{common.RedemptionCodeStatusDisabled, common.RedemptionCodeStatusUsed}).Delete(&Redemption{})
-    return result.RowsAffected, result.Error
+	// Delete both disabled and already used redemption codes
+	result := DB.Where("status IN ?", []int{common.RedemptionCodeStatusDisabled, common.RedemptionCodeStatusUsed}).Delete(&Redemption{})
+	return result.RowsAffected, result.Error
 }

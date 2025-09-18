@@ -91,21 +91,22 @@ const RegisterForm = () => {
       }
       setLoading(true);
       
-      // Handle AFF code if enabled
+      // Handle AFF code if enabled - 直接构建请求数据
+      let requestData = { ...inputs };
       let statusFromStorage = localStorage.getItem('status');
       if (statusFromStorage) {
         statusFromStorage = JSON.parse(statusFromStorage);
         if (statusFromStorage.aff_enabled === true) {
           let affCode = localStorage.getItem('aff');
           if (affCode) {
-            setInputs(prev => ({ ...prev, aff_code: affCode }));
+            requestData.aff_code = affCode;
           }
         }
       }
       
       const res = await API.post(
         `/api/user/register?turnstile=${turnstileToken}`,
-        inputs,
+        requestData,
       );
       const { success, message } = res.data;
       if (success) {
