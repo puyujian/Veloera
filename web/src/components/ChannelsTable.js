@@ -3323,31 +3323,35 @@ const ChannelsTable = () => {
 
           <div>
             <Typography.Text strong>{t('模型白名单')}</Typography.Text>
-            <Input.TextArea
+            <textarea
               rows={3}
               placeholder={t('使用逗号或换行分隔模型名称，可留空')}
               value={batchTestConfigState.modelWhitelist}
-              onChange={(value) =>
+              onChange={(e) =>
                 setBatchTestConfigState((prev) => ({
                   ...prev,
-                  modelWhitelist: value,
+                  modelWhitelist: e?.target?.value || '',
                 }))
               }
+              className='semi-input'
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 4, border: '1px solid var(--semi-color-border)', resize: 'vertical' }}
             />
           </div>
 
           <div>
             <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
-            <Input.TextArea
+            <textarea
               rows={3}
               placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
               value={batchTestConfigState.modelBlacklist}
-              onChange={(value) =>
+              onChange={(e) =>
                 setBatchTestConfigState((prev) => ({
                   ...prev,
-                  modelBlacklist: value,
+                  modelBlacklist: e?.target?.value || '',
                 }))
               }
+              className='semi-input'
+              style={{ width: '100%', padding: '8px 12px', borderRadius: 4, border: '1px solid var(--semi-color-border)', resize: 'vertical' }}
             />
           </div>
 
