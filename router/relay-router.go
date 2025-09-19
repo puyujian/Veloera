@@ -44,7 +44,6 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter := v1Router.Group("")
 		httpRouter.Use(middleware.Distribute())
 		httpRouter.POST("/messages", controller.RelayClaude)
-		httpRouter.POST("/messages/count_tokens", controller.RelayTokenCount)
 		httpRouter.POST("/completions", controller.Relay)
 		httpRouter.POST("/chat/completions", controller.Relay)
 		httpRouter.POST("/edits", controller.Relay)
@@ -70,6 +69,9 @@ func SetRelayRouter(router *gin.Engine) {
 		httpRouter.DELETE("/models/:model", controller.RelayNotImplemented)
 		httpRouter.POST("/moderations", controller.Relay)
 		httpRouter.POST("/rerank", controller.Relay)
+
+		// Token count route (no channel distribution needed)
+		v1Router.POST("/messages/count_tokens", controller.RelayTokenCount)
 	}
 
 	// 设置 /v1/models 路由
