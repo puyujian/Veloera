@@ -238,8 +238,7 @@ func ExportChannelBatchTestJob(c *gin.Context) {
         return
     }
 
-    job, err := model.GetChannelTestJob(jobID)
-    if err != nil {
+    if _, err := model.GetChannelTestJob(jobID); err != nil {
         c.JSON(http.StatusOK, gin.H{
             "success": false,
             "message": err.Error(),
