@@ -18,6 +18,7 @@ package controller
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -289,14 +290,6 @@ func claudeRequest(c *gin.Context, channel *model.Channel) *dto.ClaudeErrorWithS
 	return relay.ClaudeHelper(c)
 }
 
-func relayTokenCountRequest(c *gin.Context, relayMode int, channel *model.Channel) *dto.OpenAIErrorWithStatusCode {
-	addUsedChannel(c, channel.Id)
-	requestBody, _ := common.GetRequestBody(c)
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-	// Special handling for token counting - use the token count handler directly
-	return relayHandler(c, relayMode)
-}
-
 func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
@@ -478,95 +471,53 @@ func RelayNotFound(c *gin.Context) {
 }
 
 func RelayTokenCount(c *gin.Context) {
-	relayMode := constant.Path2RelayMode(c.Request.URL.Path)
 	requestId := c.GetString(common.RequestIdKey)
-	group := c.GetString("group")
-	originalModel := c.GetString("original_model")
-	var openaiErr *dto.OpenAIErrorWithStatusCode
 
-	autoRetryCount := model_setting.GetAutoRetryCount()
-	maxRetries := autoRetryCount
-
-	for i := 0; i <= maxRetries; i++ {
-		// 如果启用了强制切换渠道，且不是第一次尝试，则增加重试索引以获取不同渠道
-		retryIndex := i
-		if i > 0 && model_setting.ShouldForceChannelSwitch() {
-			retryIndex = i + 1 // 强制获取不同的渠道
-		}
-
-		channel, err := getChannel(c, group, originalModel, retryIndex)
-		if err != nil {
-			common.LogError(c, err.Error())
-			// Enhanced error handling for channel availability (Requirement 4.3)
-			if strings.Contains(err.Error(), "获取重试渠道失败") || strings.Contains(err.Error(), "no available channel") {
-				openaiErr = createTokenCountChannelError(originalModel, group)
-			} else {
-				openaiErr = service.OpenAIErrorWrapperLocal(err, "get_channel_failed", http.StatusInternalServerError)
-			}
-			break
-		}
-
-		// 记录响应前的状态，用于检测空回复
-		c.Set("response_written", false)
-		openaiErr = relayTokenCountRequest(c, relayMode, channel)
-
-		// 检测空回复的情况
-		if openaiErr == nil {
-			// 检查是否实际写入了响应内容
-			responseWritten := c.GetBool("response_written")
-			if !responseWritten && model_setting.GetGlobalSettings().AutoRetryEnabled {
-				// 创建一个表示空回复的错误，以便触发重试
-				openaiErr = service.OpenAIErrorWrapperLocal(
-					fmt.Errorf("empty response from upstream"),
-					"empty_response",
-					http.StatusInternalServerError,
-				)
-				common.LogWarn(c, fmt.Sprintf("detected empty response from channel #%d, will retry", channel.Id))
-			} else {
-				return // 成功处理请求，直接返回
-			}
-		}
-
-		go processChannelError(c, channel.Id, channel.Type, channel.Name, channel.GetAutoBan(), openaiErr)
-
-		if !shouldRetryWithAutoConfig(c, openaiErr, maxRetries-i) {
-			break
-		}
-	}
-	useChannel := c.GetStringSlice("use_channel")
-	if len(useChannel) > 1 {
-		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
-		common.LogInfo(c, retryLogStr)
-	}
-
-	if openaiErr != nil {
-		if openaiErr.StatusCode == http.StatusTooManyRequests {
-			common.LogError(c, fmt.Sprintf("origin 429 error: %s", openaiErr.Error.Message))
-			openaiErr.Error.Message = "当前分组上游负载已饱和，请稍后再试"
-		}
-		openaiErr.Error.Message = common.MessageWithRequestId(openaiErr.Error.Message, requestId)
-		
-		// Return error in Claude API format for token counting (Requirement 6.2)
-		c.JSON(openaiErr.StatusCode, gin.H{
-			"type":  "error",
+	// Get request body and parse it
+	requestBody, err := common.GetRequestBody(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"type": "error",
 			"error": gin.H{
-				"type":    openaiErr.Error.Type,
-				"message": openaiErr.Error.Message,
+				"type":    "invalid_request_error",
+				"message": "Failed to read request body",
 			},
 		})
+		return
 	}
-}
 
-// createTokenCountChannelError creates a Claude-formatted error for channel availability issues
-func createTokenCountChannelError(model, group string) *dto.OpenAIErrorWithStatusCode {
-	return &dto.OpenAIErrorWithStatusCode{
-		Error: dto.OpenAIError{
-			Type:    "invalid_request_error",
-			Code:    "no_available_channel",
-			Message: fmt.Sprintf("No available channels found for model '%s' in group '%s'. Please check your channel configuration or try again later.", model, group),
-		},
-		StatusCode: http.StatusServiceUnavailable,
+	// Parse Claude request
+	var claudeRequest dto.ClaudeRequest
+	err = json.Unmarshal(requestBody, &claudeRequest)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    "invalid_request_error",
+				"message": "Invalid request format",
+			},
+		})
+		return
 	}
+
+	// Count tokens locally without needing channels
+	tokenCount, err := service.CountTokenClaudeRequest(claudeRequest, claudeRequest.Model)
+	if err != nil {
+		common.LogError(c, fmt.Sprintf("Token counting failed: %s", err.Error()))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"type": "error",
+			"error": gin.H{
+				"type":    "internal_server_error",
+				"message": common.MessageWithRequestId("Token counting failed", requestId),
+			},
+		})
+		return
+	}
+
+	// Return token count in Claude API format
+	c.JSON(http.StatusOK, gin.H{
+		"input_tokens": tokenCount,
+	})
 }
 
 func RelayTask(c *gin.Context) {
