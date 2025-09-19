@@ -3175,10 +3175,18 @@ const ChannelsTable = () => {
         style={{ width: isMobile() ? '92%' : 720 }}
       >
         <Space direction='vertical' size='large' style={{ width: '100%' }}>
-          <div>
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
             <Typography.Text strong>{t('测试范围')}</Typography.Text>
-            <Space direction='vertical' style={{ marginTop: 12 }}>
+            <Space direction='vertical' style={{ marginTop: 12, width: '100%' }}>
               <Checkbox
+                style={{ display: 'block' }}
                 checked={batchTestConfigState.useSelectedChannels}
                 disabled={selectedChannels.length === 0}
                 onChange={(e) => {
@@ -3198,6 +3206,7 @@ const ChannelsTable = () => {
                 })}
               </Checkbox>
               <Checkbox
+                style={{ display: 'block' }}
                 checked={batchTestConfigState.includeAll}
                 onChange={(e) => {
                   const checked = !!e?.target?.checked;
@@ -3210,6 +3219,7 @@ const ChannelsTable = () => {
                 {t('测试全部渠道')}
               </Checkbox>
               <Checkbox
+                style={{ display: 'block' }}
                 checked={batchTestConfigState.includeDisabled}
                 onChange={(e) => {
                   const checked = !!e?.target?.checked;
@@ -3224,7 +3234,14 @@ const ChannelsTable = () => {
             </Space>
           </div>
 
-          <div>
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
             <Typography.Text strong>{t('模型范围')}</Typography.Text>
             <RadioGroup
               type='button'
@@ -3249,7 +3266,7 @@ const ChannelsTable = () => {
               </Radio>
             </RadioGroup>
             <Checkbox
-              style={{ marginTop: 12 }}
+              style={{ marginTop: 12, display: 'block' }}
               checked={batchTestConfigState.useChannelDefault}
               onChange={(e) => {
                 const checked = !!e?.target?.checked;
@@ -3263,10 +3280,21 @@ const ChannelsTable = () => {
             </Checkbox>
           </div>
 
-          <div>
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
             <Typography.Text strong>{t('并发与频率')}</Typography.Text>
-            <Space wrap style={{ marginTop: 12 }}>
-              <Space align='center'>
+            <Space
+              wrap
+              align='start'
+              style={{ marginTop: 12, rowGap: 12, columnGap: 16, width: '100%' }}
+            >
+              <Space align='center' style={{ gap: 8 }}>
                 <Typography.Text>{t('并发数')}</Typography.Text>
                 <InputNumber
                   min={1}
@@ -3279,10 +3307,10 @@ const ChannelsTable = () => {
                       concurrency: num,
                     }));
                   }}
-                  style={{ width: 90 }}
+                  style={{ width: 100 }}
                 />
               </Space>
-              <Space align='center'>
+              <Space align='center' style={{ gap: 8 }}>
                 <Typography.Text>{t('请求间隔(ms)')}</Typography.Text>
                 <InputNumber
                   min={100}
@@ -3296,10 +3324,10 @@ const ChannelsTable = () => {
                       intervalMs: num,
                     }));
                   }}
-                  style={{ width: 110 }}
+                  style={{ width: 120 }}
                 />
               </Space>
-              <Space align='center'>
+              <Space align='center' style={{ gap: 8 }}>
                 <Typography.Text>{t('最大重试次数')}</Typography.Text>
                 <InputNumber
                   min={0}
@@ -3312,19 +3340,26 @@ const ChannelsTable = () => {
                       retryLimit: num,
                     }));
                   }}
-                  style={{ width: 90 }}
+                  style={{ width: 100 }}
                 />
               </Space>
             </Space>
-            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 10 }}>
               {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
             </Typography.Text>
           </div>
 
-          <div>
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
             <Typography.Text strong>{t('模型白名单')}</Typography.Text>
             <textarea
-              rows={3}
+              rows={4}
               placeholder={t('使用逗号或换行分隔模型名称，可留空')}
               value={batchTestConfigState.modelWhitelist}
               onChange={(e) =>
@@ -3334,14 +3369,28 @@ const ChannelsTable = () => {
                 }))
               }
               className='semi-input'
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 4, border: '1px solid var(--semi-color-border)', resize: 'vertical' }}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 4,
+                border: '1px solid var(--semi-color-border)',
+                resize: 'vertical',
+                minHeight: 96,
+              }}
             />
           </div>
 
-          <div>
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
             <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
             <textarea
-              rows={3}
+              rows={4}
               placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
               value={batchTestConfigState.modelBlacklist}
               onChange={(e) =>
@@ -3351,7 +3400,14 @@ const ChannelsTable = () => {
                 }))
               }
               className='semi-input'
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 4, border: '1px solid var(--semi-color-border)', resize: 'vertical' }}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: 4,
+                border: '1px solid var(--semi-color-border)',
+                resize: 'vertical',
+                minHeight: 96,
+              }}
             />
           </div>
 
@@ -3388,9 +3444,18 @@ const ChannelsTable = () => {
           style={{
             display: isMobile() ? 'block' : 'flex',
             gap: '16px',
+            alignItems: isMobile() ? 'stretch' : 'flex-start',
           }}
         >
-          <div style={{ flex: isMobile() ? 'none' : '1', marginBottom: isMobile() ? 16 : 0 }}>
+          <div
+            style={{
+              flex: isMobile() ? 'none' : '1',
+              marginBottom: isMobile() ? 16 : 0,
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+            }}
+          >
             <div
               style={{
                 display: 'flex',
@@ -3415,14 +3480,36 @@ const ChannelsTable = () => {
                 onClick: () => fetchBatchJobDetail(record.id, { silent: false }),
                 style: { cursor: 'pointer' },
               })}
-              style={{ maxHeight: isMobile() ? 240 : 520, overflowY: 'auto' }}
+              style={{
+                maxHeight: isMobile() ? 240 : 520,
+                overflowY: 'auto',
+                width: '100%',
+              }}
             />
           </div>
 
-          <div style={{ flex: isMobile() ? 'none' : '2' }}>
+          <div
+            style={{
+              flex: isMobile() ? 'none' : '2',
+              minWidth: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              maxHeight: isMobile() ? 'none' : '70vh',
+              overflow: isMobile() ? 'visible' : 'hidden',
+            }}
+          >
             {activeBatchJob ? (
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 16,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <Typography.Title heading={6} style={{ margin: 0 }}>
                     {t('任务 #{{id}}', { id: activeBatchJob.id })}
                   </Typography.Title>
@@ -3435,11 +3522,11 @@ const ChannelsTable = () => {
                     </Button>
                   </Space>
                 </div>
-                <Space size='small' style={{ marginBottom: 12 }}>
+                <Space size='small'>
                   <Typography.Text>{t('状态')}:</Typography.Text>
                   {renderJobStatusTag(activeBatchJob.status)}
                 </Space>
-                <div style={{ marginBottom: 12 }}>
+                <div>
                   <Typography.Text>
                     {t('通道数')}:{' '}
                     <Typography.Text strong>{activeBatchJob.total_channels || 0}</Typography.Text>
@@ -3449,7 +3536,7 @@ const ChannelsTable = () => {
                     <Typography.Text strong>{activeBatchJob.total_models || 0}</Typography.Text>
                   </Typography.Text>
                 </div>
-                <div style={{ marginBottom: 12 }}>
+                <div>
                   <Typography.Text>
                     {t('进度')}:{' '}
                     <Typography.Text strong>
@@ -3485,7 +3572,7 @@ const ChannelsTable = () => {
                 </div>
 
                 {batchJobDetail?.options && (
-                  <div style={{ marginBottom: 16 }}>
+                  <div>
                     <Typography.Text strong>{t('任务配置')}</Typography.Text>
                     <div style={{ marginTop: 8, lineHeight: 1.6 }}>
                       <div>
@@ -3559,20 +3646,22 @@ const ChannelsTable = () => {
                 <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
                   {t('测试结果')}
                 </Typography.Text>
-                <Table
-                  size='small'
-                  loading={batchJobResultsLoading || batchJobDetailLoading}
-                  columns={jobResultColumns}
-                  dataSource={batchJobResults}
-                  pagination={{
-                    currentPage: batchJobResultsPage,
-                    pageSize: batchJobResultsPageSize,
-                    total: batchJobResultsTotal,
-                    onPageChange: handleBatchJobResultPageChange,
-                    showSizeChanger: false,
-                  }}
-                  style={{ maxHeight: isMobile() ? 240 : 400, overflowY: 'auto' }}
-                />
+                <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex' }}>
+                  <Table
+                    size='small'
+                    loading={batchJobResultsLoading || batchJobDetailLoading}
+                    columns={jobResultColumns}
+                    dataSource={batchJobResults}
+                    pagination={{
+                      currentPage: batchJobResultsPage,
+                      pageSize: batchJobResultsPageSize,
+                      total: batchJobResultsTotal,
+                      onPageChange: handleBatchJobResultPageChange,
+                      showSizeChanger: false,
+                    }}
+                    style={{ width: '100%', overflowY: 'auto', maxHeight: isMobile() ? 240 : '100%' }}
+                  />
+                </div>
               </div>
             ) : (
               <div
