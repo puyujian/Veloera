@@ -76,6 +76,8 @@ import EditTagModal from '../pages/Channel/EditTagModal.js';
 import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
+const { TextArea } = Input;
+
 function renderTimestamp(timestamp) {
   return <>{timestamp2string(timestamp)}</>;
 }
@@ -1122,6 +1124,35 @@ const ChannelsTable = () => {
   // 批量测试控制
   const [batchTestAbortController, setBatchTestAbortController] = useState(null);
 
+  const initialBatchTestConfig = {
+    useSelectedChannels: true,
+    includeAll: false,
+    includeDisabled: false,
+    modelScope: 'all',
+    modelWhitelist: '',
+    modelBlacklist: '',
+    useChannelDefault: true,
+    concurrency: 2,
+    intervalMs: 200,
+    retryLimit: 1,
+  };
+  const [showBatchTestConfig, setShowBatchTestConfig] = useState(false);
+  const [startingBatchTest, setStartingBatchTest] = useState(false);
+  const [batchTestConfigState, setBatchTestConfigState] = useState(initialBatchTestConfig);
+  const [showBatchJobPanel, setShowBatchJobPanel] = useState(false);
+  const [batchJobsLoading, setBatchJobsLoading] = useState(false);
+  const [batchJobs, setBatchJobs] = useState([]);
+  const [activeBatchJob, setActiveBatchJob] = useState(null);
+  const [batchJobDetail, setBatchJobDetail] = useState(null);
+  const [batchJobDetailLoading, setBatchJobDetailLoading] = useState(false);
+  const [batchJobResults, setBatchJobResults] = useState([]);
+  const [batchJobResultsPage, setBatchJobResultsPage] = useState(1);
+  const [batchJobResultsPageSize, setBatchJobResultsPageSize] = useState(20);
+  const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
+  const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
+  const [deletingFailedModels, setDeletingFailedModels] = useState(false);
+  const [dryRunDeleteFailed, setDryRunDeleteFailed] = useState(true);
+
   const removeRecord = (record) => {
     let newDataSource = [...channels];
     if (record.id != null) {
@@ -1247,6 +1278,404 @@ const ChannelsTable = () => {
     setLoading(false);
   };
 
+  const normalizeModelList = (value) => {
+    if (!value) {
+      return [];
+    }
+    return value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  };
+
+  const openBatchTestConfigModal = () => {
+    setBatchTestConfigState((prev) => ({
+      ...prev,
+      useSelectedChannels: selectedChannels.length > 0,
+      includeAll: selectedChannels.length === 0 ? true : prev.includeAll,
+    }));
+    setShowBatchTestConfig(true);
+  };
+
+  const closeBatchTestConfigModal = () => {
+    setShowBatchTestConfig(false);
+    setStartingBatchTest(false);
+  };
+
+  const resetBatchTestConfig = () => {
+    setBatchTestConfigState({ ...initialBatchTestConfig });
+    setDryRunDeleteFailed(true);
+  };
+
+  const startBatchChannelTest = async () => {
+    if (startingBatchTest) {
+      return;
+    }
+    const config = batchTestConfigState;
+    let channelIds = [];
+    if (config.useSelectedChannels && selectedChannels.length > 0) {
+      channelIds = selectedChannels
+        .map((item) => item.id)
+        .filter((id) => typeof id === 'number' && id > 0);
+    }
+
+    if (!config.includeAll && channelIds.length === 0) {
+      showWarning(t('请至少选择一个渠道或勾选全量测试'));
+      return;
+    }
+
+    const payload = {
+      channel_ids: channelIds,
+      include_all: config.includeAll,
+      include_disabled: config.includeDisabled,
+      model_scope: config.modelScope,
+      model_whitelist: normalizeModelList(config.modelWhitelist),
+      model_blacklist: normalizeModelList(config.modelBlacklist),
+      use_channel_default: config.useChannelDefault,
+      concurrency: config.concurrency,
+      interval_ms: config.intervalMs,
+      retry_limit: config.retryLimit,
+    };
+
+    setStartingBatchTest(true);
+    try {
+      const res = await API.post('/api/channel/test/batch', payload);
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('创建批量模型测试任务失败'));
+        return;
+      }
+      showSuccess(t('批量模型测试任务已创建，开始后台执行'));
+      closeBatchTestConfigModal();
+      resetBatchTestConfig();
+      setShowBatchJobPanel(true);
+      await fetchBatchJobs(true);
+      if (data?.job_id) {
+        await fetchBatchJobDetail(data.job_id, { silent: false });
+      }
+    } catch (error) {
+      showError(error?.message || t('创建批量模型测试任务失败'));
+    } finally {
+      setStartingBatchTest(false);
+    }
+  };
+
+  const fetchBatchJobs = async (silent = false) => {
+    if (!silent) {
+      setBatchJobsLoading(true);
+    }
+    try {
+      const res = await API.get('/api/channel/test/jobs?limit=50');
+      const { success, message, data } = res.data;
+      if (success) {
+        setBatchJobs(Array.isArray(data?.jobs) ? data.jobs : []);
+      } else {
+        showError(message || t('获取批量测试任务列表失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('获取批量测试任务列表失败'));
+    } finally {
+      if (!silent) {
+        setBatchJobsLoading(false);
+      }
+    }
+  };
+
+  const handleOpenBatchJobPanel = async () => {
+    setShowBatchJobPanel(true);
+    await fetchBatchJobs();
+  };
+
+  const fetchBatchJobDetail = async (jobId, options = {}) => {
+    if (!jobId) {
+      return;
+    }
+    const { silent = false } = options;
+    if (!silent) {
+      setBatchJobDetailLoading(true);
+    }
+    try {
+      const res = await API.get(`/api/channel/test/jobs/${jobId}`);
+      const { success, message, data } = res.data;
+      if (success) {
+        setActiveBatchJob(data?.job || null);
+        setBatchJobDetail(data || null);
+        setDryRunDeleteFailed(true);
+        const targetPage = options.page || 1;
+        await fetchBatchJobResults(jobId, targetPage, batchJobResultsPageSize, true);
+        await fetchBatchJobs(true);
+      } else if (!silent) {
+        showError(message || t('获取任务详情失败'));
+      }
+    } catch (error) {
+      if (!silent) {
+        showError(error?.message || t('获取任务详情失败'));
+      }
+    } finally {
+      if (!silent) {
+        setBatchJobDetailLoading(false);
+      }
+    }
+  };
+
+  const fetchBatchJobResults = async (jobId, page = 1, pageSize = batchJobResultsPageSize, silent = false) => {
+    if (!jobId) {
+      return;
+    }
+    if (!silent) {
+      setBatchJobResultsLoading(true);
+    }
+    try {
+      const res = await API.get(
+        `/api/channel/test/jobs/${jobId}/results?page=${page}&page_size=${pageSize}`,
+      );
+      const { success, message, data } = res.data;
+      if (success) {
+        const items = Array.isArray(data?.results)
+          ? data.results.map((item, index) => ({
+              ...item,
+              key: item.id || `${item.channel_id}-${item.model_name}-${index}`,
+            }))
+          : [];
+        setBatchJobResults(items);
+        setBatchJobResultsTotal(data?.total || 0);
+        setBatchJobResultsPage(data?.page || page);
+      } else if (!silent) {
+        showError(message || t('获取测试结果失败'));
+      }
+    } catch (error) {
+      if (!silent) {
+        showError(error?.message || t('获取测试结果失败'));
+      }
+    } finally {
+      if (!silent) {
+        setBatchJobResultsLoading(false);
+      }
+    }
+  };
+
+  const handleBatchJobResultPageChange = async (page) => {
+    if (!activeBatchJob) {
+      return;
+    }
+    await fetchBatchJobResults(activeBatchJob.id, page);
+  };
+
+  const handleCancelBatchJob = async (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    try {
+      const res = await API.post(`/api/channel/test/jobs/${jobId}/cancel`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('已发送取消指令'));
+        await fetchBatchJobDetail(jobId, { silent: true });
+      } else {
+        showError(message || t('任务取消失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('任务取消失败'));
+    }
+  };
+
+  const handleExportBatchJob = (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    const baseURL = API.defaults?.baseURL || '';
+    const url = `${baseURL}/api/channel/test/jobs/${jobId}/export`;
+    window.open(url, '_blank');
+  };
+
+  const handleDeleteFailedModels = async (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    setDeletingFailedModels(true);
+    try {
+      const payload = {
+        dry_run: dryRunDeleteFailed,
+      };
+      const res = await API.post(`/api/channel/test/jobs/${jobId}/delete_failed`, payload);
+      const { success, message, data } = res.data;
+      if (success) {
+        const summary = Array.isArray(data?.summary) ? data.summary : [];
+        const deleted = data?.deleted || 0;
+        if (dryRunDeleteFailed) {
+          showInfo(
+            t('预览完成，共有 {{count}} 个渠道存在失败模型', {
+              count: summary.length,
+            }),
+          );
+        } else {
+          showSuccess(
+            t('批量删除失败模型完成，共移除 {{count}} 个模型', {
+              count: deleted,
+            }),
+          );
+          await refresh();
+          await fetchBatchJobDetail(jobId, { silent: true });
+        }
+        setBatchJobDetail((prev) => {
+          if (!prev) {
+            return prev;
+          }
+          return {
+            ...prev,
+            deleteSummary: summary,
+          };
+        });
+      } else {
+        showError(message || t('批量删除失败模型失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('批量删除失败模型失败'));
+    } finally {
+      setDeletingFailedModels(false);
+    }
+  };
+
+  const renderJobStatusTag = (status) => {
+    const map = {
+      PENDING: { color: 'blue', text: t('排队中') },
+      RUNNING: { color: 'orange', text: t('运行中') },
+      SUCCESS: { color: 'green', text: t('已完成') },
+      FAILED: { color: 'red', text: t('失败') },
+      CANCELED: { color: 'grey', text: t('已取消') },
+    };
+    const info = map[status] || { color: 'grey', text: status };
+    return <Tag color={info.color}>{info.text}</Tag>;
+  };
+
+  const jobColumns = [
+    {
+      title: t('任务ID'),
+      dataIndex: 'id',
+      key: 'id',
+      width: 90,
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (_, record) => renderJobStatusTag(record.status),
+    },
+    {
+      title: t('通道数'),
+      dataIndex: 'total_channels',
+      key: 'total_channels',
+      width: 100,
+      render: (_, record) => record.total_channels || 0,
+    },
+    {
+      title: t('进度'),
+      key: 'progress',
+      render: (_, record) => {
+        if (!record.total_models) {
+          return '-';
+        }
+        return `${record.completed_count}/${record.total_models}`;
+      },
+    },
+    {
+      title: t('创建时间'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 150,
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+    {
+      title: t('操作'),
+      key: 'actions',
+      width: 180,
+      render: (_, record) => (
+        <Space>
+          <Button
+            size='small'
+            onClick={(e) => {
+              e.stopPropagation();
+              fetchBatchJobDetail(record.id, { silent: false });
+            }}
+          >
+            {t('查看')}
+          </Button>
+          <Button
+            size='small'
+            disabled={record.status !== 'RUNNING' && record.status !== 'PENDING'}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCancelBatchJob(record.id);
+            }}
+          >
+            {t('取消')}
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const jobResultColumns = [
+    {
+      title: t('渠道'),
+      dataIndex: 'channel_name',
+      key: 'channel_name',
+      width: 180,
+      render: (text) => (
+        <Typography.Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 160 }}>
+          {text || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: t('模型'),
+      dataIndex: 'model_name',
+      key: 'model_name',
+      width: 220,
+      render: (text) => (
+        <Typography.Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 200 }}>
+          {text || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'success',
+      key: 'success',
+      width: 100,
+      render: (_, record) =>
+        record.success ? (
+          <Tag color='green'>{t('成功')}</Tag>
+        ) : (
+          <Tag color='red'>{t('失败')}</Tag>
+        ),
+    },
+    {
+      title: t('耗时'),
+      key: 'duration',
+      width: 100,
+      render: (_, record) =>
+        record.duration_millis ? `${(record.duration_millis / 1000).toFixed(2)}s` : '-',
+    },
+    {
+      title: t('重试次数'),
+      dataIndex: 'retry_count',
+      key: 'retry_count',
+      width: 100,
+    },
+    {
+      title: t('错误信息'),
+      dataIndex: 'error_message',
+      key: 'error_message',
+      render: (text) => (
+        <Typography.Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 280 }}>
+          {text || '-'}
+        </Typography.Text>
+      ),
+    },
+  ];
+
   const copySelectedChannel = async (record) => {
     const channelToCopy = record;
     channelToCopy.name += t('_复制');
@@ -1308,13 +1737,42 @@ const ChannelsTable = () => {
       const cachedResults = getCachedTestResults(currentTestChannel.id);
       if (cachedResults) {
         setBatchTestResults(cachedResults);
-        setTestProgress({ 
-          completed: cachedResults.length, 
-          total: currentTestChannel.models?.split(',').filter(m => m.trim()).length || 0 
+        setTestProgress({
+          completed: cachedResults.length,
+          total:
+            currentTestChannel.models
+              ?.split(',')
+              .filter((m) => m.trim()).length || 0,
         });
       }
     }
   }, [showModelTestModal, currentTestChannel]);
+
+  useEffect(() => {
+    if (!showBatchJobPanel) {
+      return;
+    }
+    fetchBatchJobs(true).then();
+  }, [showBatchJobPanel]);
+
+  useEffect(() => {
+    if (!showBatchJobPanel || !activeBatchJob) {
+      return;
+    }
+    if (
+      activeBatchJob.status !== 'RUNNING' &&
+      activeBatchJob.status !== 'PENDING'
+    ) {
+      return;
+    }
+    const timer = setInterval(() => {
+      fetchBatchJobDetail(activeBatchJob.id, {
+        silent: true,
+        page: batchJobResultsPage,
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [showBatchJobPanel, activeBatchJob, batchJobResultsPage]);
 
   // 加载测试结果缓存
   const loadTestResultsCache = () => {
@@ -2641,6 +3099,21 @@ const ChannelsTable = () => {
 
           <Button
             theme='light'
+            type='primary'
+            onClick={openBatchTestConfigModal}
+          >
+            {t('批量模型测试')}
+          </Button>
+
+          <Button
+            theme='light'
+            onClick={handleOpenBatchJobPanel}
+          >
+            {t('查看测试任务')}
+          </Button>
+
+          <Button
+            theme='light'
             type='tertiary'
             icon={<IconSetting />}
             onClick={() => setShowColumnSelector(true)}
@@ -2680,6 +3153,442 @@ const ChannelsTable = () => {
             : null
         }
       />
+      <Modal
+        title={t('批量模型测试配置')}
+        visible={showBatchTestConfig}
+        maskClosable={false}
+        centered={true}
+        onCancel={() => {
+          closeBatchTestConfigModal();
+        }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={resetBatchTestConfig}>{t('重置')}</Button>
+            <Button onClick={() => closeBatchTestConfigModal()}>{t('取消')}</Button>
+            <Button
+              type='primary'
+              loading={startingBatchTest}
+              onClick={startBatchChannelTest}
+            >
+              {startingBatchTest ? t('创建中...') : t('开始测试')}
+            </Button>
+          </div>
+        }
+        style={{ width: isMobile() ? '92%' : 720 }}
+      >
+        <Space direction='vertical' size='large' style={{ width: '100%' }}>
+          <div>
+            <Typography.Text strong>{t('测试范围')}</Typography.Text>
+            <Space direction='vertical' style={{ marginTop: 12 }}>
+              <Checkbox
+                checked={batchTestConfigState.useSelectedChannels}
+                disabled={selectedChannels.length === 0}
+                onChange={(e) => {
+                  const checked = !!e?.target?.checked;
+                  setBatchTestConfigState((prev) => ({
+                    ...prev,
+                    useSelectedChannels: checked,
+                    includeAll:
+                      checked && selectedChannels.length > 0
+                        ? prev.includeAll
+                        : true,
+                  }));
+                }}
+              >
+                {t('仅测试所选渠道（已选 {{count}} 个）', {
+                  count: selectedChannels.length,
+                })}
+              </Checkbox>
+              <Checkbox
+                checked={batchTestConfigState.includeAll}
+                onChange={(e) => {
+                  const checked = !!e?.target?.checked;
+                  setBatchTestConfigState((prev) => ({
+                    ...prev,
+                    includeAll: checked,
+                  }));
+                }}
+              >
+                {t('测试全部渠道')}
+              </Checkbox>
+              <Checkbox
+                checked={batchTestConfigState.includeDisabled}
+                onChange={(e) => {
+                  const checked = !!e?.target?.checked;
+                  setBatchTestConfigState((prev) => ({
+                    ...prev,
+                    includeDisabled: checked,
+                  }));
+                }}
+              >
+                {t('包含已禁用渠道')}
+              </Checkbox>
+            </Space>
+          </div>
+
+          <div>
+            <Typography.Text strong>{t('模型范围')}</Typography.Text>
+            <RadioGroup
+              type='button'
+              value={batchTestConfigState.modelScope}
+              onChange={(val) => {
+                const value =
+                  typeof val === 'string'
+                    ? val
+                    : val?.target?.value || val?.value || 'all';
+                setBatchTestConfigState((prev) => ({
+                  ...prev,
+                  modelScope: value,
+                }));
+              }}
+              style={{ marginTop: 12, display: 'flex', gap: 8 }}
+            >
+              <Radio value='all' style={{ flex: 1 }}>
+                {t('全部模型')}
+              </Radio>
+              <Radio value='default' style={{ flex: 1 }}>
+                {t('仅默认测试模型')}
+              </Radio>
+            </RadioGroup>
+            <Checkbox
+              style={{ marginTop: 12 }}
+              checked={batchTestConfigState.useChannelDefault}
+              onChange={(e) => {
+                const checked = !!e?.target?.checked;
+                setBatchTestConfigState((prev) => ({
+                  ...prev,
+                  useChannelDefault: checked,
+                }));
+              }}
+            >
+              {t('优先使用渠道自定义默认模型')}
+            </Checkbox>
+          </div>
+
+          <div>
+            <Typography.Text strong>{t('并发与频率')}</Typography.Text>
+            <Space wrap style={{ marginTop: 12 }}>
+              <Space align='center'>
+                <Typography.Text>{t('并发数')}</Typography.Text>
+                <InputNumber
+                  min={1}
+                  max={16}
+                  value={batchTestConfigState.concurrency}
+                  onChange={(value) => {
+                    const num = Math.max(1, Math.min(16, Number(value) || 1));
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      concurrency: num,
+                    }));
+                  }}
+                  style={{ width: 90 }}
+                />
+              </Space>
+              <Space align='center'>
+                <Typography.Text>{t('请求间隔(ms)')}</Typography.Text>
+                <InputNumber
+                  min={100}
+                  max={5000}
+                  step={50}
+                  value={batchTestConfigState.intervalMs}
+                  onChange={(value) => {
+                    const num = Math.max(100, Math.min(5000, Number(value) || 100));
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      intervalMs: num,
+                    }));
+                  }}
+                  style={{ width: 110 }}
+                />
+              </Space>
+              <Space align='center'>
+                <Typography.Text>{t('最大重试次数')}</Typography.Text>
+                <InputNumber
+                  min={0}
+                  max={5}
+                  value={batchTestConfigState.retryLimit}
+                  onChange={(value) => {
+                    const num = Math.max(0, Math.min(5, Number(value) || 0));
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      retryLimit: num,
+                    }));
+                  }}
+                  style={{ width: 90 }}
+                />
+              </Space>
+            </Space>
+            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+              {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
+            </Typography.Text>
+          </div>
+
+          <div>
+            <Typography.Text strong>{t('模型白名单')}</Typography.Text>
+            <TextArea
+              rows={3}
+              placeholder={t('使用逗号或换行分隔模型名称，可留空')}
+              value={batchTestConfigState.modelWhitelist}
+              onChange={(value) =>
+                setBatchTestConfigState((prev) => ({
+                  ...prev,
+                  modelWhitelist: value,
+                }))
+              }
+            />
+          </div>
+
+          <div>
+            <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
+            <TextArea
+              rows={3}
+              placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
+              value={batchTestConfigState.modelBlacklist}
+              onChange={(value) =>
+                setBatchTestConfigState((prev) => ({
+                  ...prev,
+                  modelBlacklist: value,
+                }))
+              }
+            />
+          </div>
+
+          <Typography.Text type='tertiary'>
+            {t('提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。')}
+          </Typography.Text>
+        </Space>
+      </Modal>
+
+      <Modal
+        title={t('批量模型测试任务看板')}
+        visible={showBatchJobPanel}
+        centered={true}
+        maskClosable={false}
+        onCancel={() => {
+          setShowBatchJobPanel(false);
+          setActiveBatchJob(null);
+          setBatchJobDetail(null);
+          setBatchJobResults([]);
+          setBatchJobResultsPage(1);
+          setBatchJobResultsTotal(0);
+        }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <Button onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
+              {t('刷新列表')}
+            </Button>
+            <Button onClick={() => setShowBatchJobPanel(false)}>{t('关闭')}</Button>
+          </div>
+        }
+        style={{ width: isMobile() ? '96%' : 1100 }}
+      >
+        <div
+          style={{
+            display: isMobile() ? 'block' : 'flex',
+            gap: '16px',
+          }}
+        >
+          <div style={{ flex: isMobile() ? 'none' : '1', marginBottom: isMobile() ? 16 : 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 12,
+              }}
+            >
+              <Typography.Text strong>{t('任务列表')}</Typography.Text>
+              <Button size='small' onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
+                {t('刷新')}
+              </Button>
+            </div>
+            <Table
+              size='small'
+              loading={batchJobsLoading}
+              columns={jobColumns}
+              dataSource={batchJobs.map((job) => ({ ...job, key: job.id }))}
+              pagination={false}
+              rowKey='id'
+              onRow={(record) => ({
+                onClick: () => fetchBatchJobDetail(record.id, { silent: false }),
+                style: { cursor: 'pointer' },
+              })}
+              style={{ maxHeight: isMobile() ? 240 : 520, overflowY: 'auto' }}
+            />
+          </div>
+
+          <div style={{ flex: isMobile() ? 'none' : '2' }}>
+            {activeBatchJob ? (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Typography.Title heading={6} style={{ margin: 0 }}>
+                    {t('任务 #{{id}}', { id: activeBatchJob.id })}
+                  </Typography.Title>
+                  <Space>
+                    <Button size='small' onClick={() => fetchBatchJobDetail(activeBatchJob.id)} loading={batchJobDetailLoading}>
+                      {t('刷新')}
+                    </Button>
+                    <Button size='small' onClick={() => handleExportBatchJob(activeBatchJob.id)}>
+                      {t('导出报告')}
+                    </Button>
+                  </Space>
+                </div>
+                <Space size='small' style={{ marginBottom: 12 }}>
+                  <Typography.Text>{t('状态')}:</Typography.Text>
+                  {renderJobStatusTag(activeBatchJob.status)}
+                </Space>
+                <div style={{ marginBottom: 12 }}>
+                  <Typography.Text>
+                    {t('通道数')}:{' '}
+                    <Typography.Text strong>{activeBatchJob.total_channels || 0}</Typography.Text>
+                  </Typography.Text>
+                  <Typography.Text style={{ marginLeft: 16 }}>
+                    {t('模型数')}:{' '}
+                    <Typography.Text strong>{activeBatchJob.total_models || 0}</Typography.Text>
+                  </Typography.Text>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <Typography.Text>
+                    {t('进度')}:{' '}
+                    <Typography.Text strong>
+                      {`${activeBatchJob.completed_count || 0}/${activeBatchJob.total_models || 0}`}
+                    </Typography.Text>
+                  </Typography.Text>
+                  <div
+                    style={{
+                      height: 6,
+                      backgroundColor: 'var(--semi-color-fill-1)',
+                      borderRadius: 3,
+                      overflow: 'hidden',
+                      marginTop: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width:
+                          activeBatchJob.total_models > 0
+                            ? `${Math.min(
+                                100,
+                                ((activeBatchJob.completed_count || 0) /
+                                  activeBatchJob.total_models) *
+                                  100,
+                              ).toFixed(2)}%`
+                            : '0%',
+                        backgroundColor: 'var(--semi-color-primary)',
+                        transition: 'width 0.3s ease',
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {batchJobDetail?.options && (
+                  <div style={{ marginBottom: 16 }}>
+                    <Typography.Text strong>{t('任务配置')}</Typography.Text>
+                    <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+                      <div>
+                        {t('模型范围')}: {batchJobDetail.options.model_scope === 'default' ? t('仅默认测试模型') : t('全部模型')}
+                      </div>
+                      <div>
+                        {t('包含禁用渠道')}: {batchJobDetail.options.include_disabled ? t('是') : t('否')}
+                      </div>
+                      <div>
+                        {t('使用渠道默认模型')}:{' '}
+                        {batchJobDetail.options.use_channel_default ? t('是') : t('否')}
+                      </div>
+                      {Array.isArray(batchJobDetail.options.channel_ids) && batchJobDetail.options.channel_ids.length > 0 && (
+                        <div>
+                          {t('渠道ID')}:{' '}
+                          {batchJobDetail.options.channel_ids.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  marginBottom: 16,
+                  flexWrap: 'wrap',
+                }}>
+                  <Checkbox
+                    checked={dryRunDeleteFailed}
+                    onChange={(e) => setDryRunDeleteFailed(!!e?.target?.checked)}
+                    disabled={activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING'}
+                  >
+                    {t('预览模式（不执行真实删除）')}
+                  </Checkbox>
+                  <Button
+                    type='warning'
+                    size='small'
+                    loading={deletingFailedModels}
+                    disabled={activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING'}
+                    onClick={() => handleDeleteFailedModels(activeBatchJob.id)}
+                  >
+                    {dryRunDeleteFailed ? t('预览失败模型') : t('删除失败模型')}
+                  </Button>
+                </div>
+
+                {Array.isArray(batchJobDetail?.deleteSummary) && batchJobDetail.deleteSummary.length > 0 && (
+                  <div
+                    style={{
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 6,
+                      padding: 12,
+                      marginBottom: 16,
+                      maxHeight: 180,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                      {t('失败模型摘要（最新一次操作）')}
+                    </Typography.Text>
+                    {batchJobDetail.deleteSummary.map((item, idx) => (
+                      <Typography.Text key={idx} style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>
+                        #{item.channel_id} {item.channel_name || ''} — {Array.isArray(item.removed) ? item.removed.join(', ') : '-'}
+                        {item.error ? ` (${item.error})` : ''}
+                      </Typography.Text>
+                    ))}
+                  </div>
+                )}
+
+                <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                  {t('测试结果')}
+                </Typography.Text>
+                <Table
+                  size='small'
+                  loading={batchJobResultsLoading || batchJobDetailLoading}
+                  columns={jobResultColumns}
+                  dataSource={batchJobResults}
+                  pagination={{
+                    currentPage: batchJobResultsPage,
+                    pageSize: batchJobResultsPageSize,
+                    total: batchJobResultsTotal,
+                    onPageChange: handleBatchJobResultPageChange,
+                    showSizeChanger: false,
+                  }}
+                  style={{ maxHeight: isMobile() ? 240 : 400, overflowY: 'auto' }}
+                />
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 200,
+                  color: 'var(--semi-color-text-2)',
+                }}
+              >
+                {t('请选择左侧任务以查看详情')}
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         title={t('批量设置标签')}
         visible={showBatchSetTag}

@@ -155,6 +155,7 @@ func main() {
 	}
 
 	service.InitTokenEncoders()
+	service.InitChannelBatchTestRunner()
 
 	// Initialize HTTP server
 	server := gin.New()
