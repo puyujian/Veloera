@@ -76,8 +76,6 @@ import EditTagModal from '../pages/Channel/EditTagModal.js';
 import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
-const { TextArea } = Input;
-
 function renderTimestamp(timestamp) {
   return <>{timestamp2string(timestamp)}</>;
 }
@@ -3325,7 +3323,7 @@ const ChannelsTable = () => {
 
           <div>
             <Typography.Text strong>{t('模型白名单')}</Typography.Text>
-            <TextArea
+            <Input.TextArea
               rows={3}
               placeholder={t('使用逗号或换行分隔模型名称，可留空')}
               value={batchTestConfigState.modelWhitelist}
@@ -3340,7 +3338,7 @@ const ChannelsTable = () => {
 
           <div>
             <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
-            <TextArea
+            <Input.TextArea
               rows={3}
               placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
               value={batchTestConfigState.modelBlacklist}
