@@ -159,7 +159,7 @@ func ExecuteChannelTest(channel *model.Channel, testModel string) (consumed floa
     }
     info.PromptTokens = usage.PromptTokens
 
-    quota := calculateQuota(usage, priceData)
+    quota := calculateQuota(usage, &priceData)
 
     elapsed := time.Since(start)
     milliseconds := elapsed.Milliseconds()
@@ -214,7 +214,7 @@ func buildTestRequest(modelName string) *dto.GeneralOpenAIRequest {
     return request
 }
 
-func calculateQuota(usage *dto.Usage, priceData *helper.ModelPriceData) int {
+func calculateQuota(usage *dto.Usage, priceData *helper.PriceData) int {
     if priceData == nil || usage == nil {
         return 0
     }

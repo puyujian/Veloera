@@ -13,7 +13,6 @@ import (
     "veloera/model"
 
     "github.com/bytedance/gopkg/util/gopool"
-    "gorm.io/gorm"
 )
 
 type channelTestTask struct {
@@ -43,14 +42,14 @@ func InitRunner() {
         channelTestRunner = &ChannelTestJobRunner{
             running: make(map[int64]*channelTestJobRuntime),
         }
-        _, _ = model.DB.Model(&model.ChannelTestJob{}).
+        model.DB.Model(&model.ChannelTestJob{}).
             Where("status = ?", model.ChannelTestJobStatusRunning).
             Updates(map[string]any{
                 "status":       model.ChannelTestJobStatusFailed,
                 "error_message": "服务重启导致任务中断",
                 "finished_at":  time.Now().Unix(),
                 "updated_at":   time.Now().Unix(),
-            }).RowsAffected
+            })
     })
 }
 
