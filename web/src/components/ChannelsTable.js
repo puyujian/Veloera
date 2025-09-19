@@ -1488,7 +1488,7 @@ const ChannelsTable = () => {
     window.open(url, '_blank');
   };
 
-  const handleDeleteFailedModels = async (jobId) => {
+  const handleBatchJobDeleteFailedModels = async (jobId) => {
     if (!jobId) {
       return;
     }
@@ -3525,7 +3525,7 @@ const ChannelsTable = () => {
                     size='small'
                     loading={deletingFailedModels}
                     disabled={activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING'}
-                    onClick={() => handleDeleteFailedModels(activeBatchJob.id)}
+                    onClick={() => handleBatchJobDeleteFailedModels(activeBatchJob.id)}
                   >
                     {dryRunDeleteFailed ? t('预览失败模型') : t('删除失败模型')}
                   </Button>
