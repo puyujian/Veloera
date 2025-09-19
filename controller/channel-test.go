@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"veloera/channeltest"
 	"veloera/common"
 	"veloera/dto"
 	"veloera/model"
@@ -52,7 +53,7 @@ func TestChannel(c *gin.Context) {
 	}
 
 	testModel := c.Query("model")
-	consumedTime, execErr, _ := service.ExecuteChannelTest(channel, testModel)
+	consumedTime, execErr, _ := channeltest.ExecuteChannelTest(channel, testModel)
 
 	if execErr != nil {
 		milliseconds := int64(consumedTime * 1000)
@@ -97,7 +98,7 @@ func testAllChannels(notify bool) error {
 	gopool.Go(func() {
 		for _, channel := range channels {
 			isChannelEnabled := channel.Status == common.ChannelStatusEnabled
-			consumedTime, execErr, openaiWithStatusErr := service.ExecuteChannelTest(channel, "")
+			consumedTime, execErr, openaiWithStatusErr := channeltest.ExecuteChannelTest(channel, "")
 			milliseconds := int64(consumedTime * 1000)
 
 			shouldBanChannel := false

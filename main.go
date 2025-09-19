@@ -24,6 +24,7 @@ import (
 	"os"
 	"strconv"
 	"veloera/common"
+	"veloera/channeltest"
 	"veloera/constant"
 	"veloera/controller"
 	"veloera/middleware"
@@ -155,7 +156,7 @@ func main() {
 	}
 
 	service.InitTokenEncoders()
-	service.InitChannelBatchTestRunner()
+	channeltest.InitRunner()
 
 	// Initialize HTTP server
 	server := gin.New()

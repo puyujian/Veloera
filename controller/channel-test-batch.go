@@ -7,8 +7,8 @@ import (
     "strconv"
     "strings"
     "time"
+    "veloera/channeltest"
     "veloera/model"
-    "veloera/service"
 
     "github.com/gin-gonic/gin"
 )
@@ -85,7 +85,7 @@ func StartChannelBatchTest(c *gin.Context) {
         return
     }
 
-    if err := service.SubmitChannelTestJob(job.ID); err != nil {
+    if err := channeltest.SubmitJob(job.ID); err != nil {
         _ = model.FinalizeChannelTestJob(job.ID, model.ChannelTestJobStatusFailed, err.Error())
         c.JSON(http.StatusOK, gin.H{
             "success": false,
@@ -213,7 +213,7 @@ func CancelChannelBatchTestJob(c *gin.Context) {
         return
     }
 
-    if err := service.CancelChannelTestJob(jobID); err != nil {
+    if err := channeltest.CancelJob(jobID); err != nil {
         c.JSON(http.StatusOK, gin.H{
             "success": false,
             "message": err.Error(),
