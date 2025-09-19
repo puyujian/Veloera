@@ -3174,7 +3174,7 @@ const ChannelsTable = () => {
         }
         style={{ width: isMobile() ? '92%' : 720 }}
       >
-        <Space direction='vertical' size='large' style={{ width: '100%' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, width: '100%' }}>
           <div
             style={{
               padding: '14px 18px',
@@ -3289,13 +3289,18 @@ const ChannelsTable = () => {
             }}
           >
             <Typography.Text strong>{t('并发与频率')}</Typography.Text>
-            <Space
-              wrap
-              align='start'
-              style={{ marginTop: 12, rowGap: 12, columnGap: 16, width: '100%' }}
+            <div
+              style={{
+                marginTop: 12,
+                display: 'flex',
+                flexDirection: isMobile() ? 'column' : 'row',
+                gap: 20,
+                width: '100%',
+                flexWrap: 'wrap',
+              }}
             >
-              <Space align='center' style={{ gap: 8 }}>
-                <Typography.Text>{t('并发数')}</Typography.Text>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
+                <Typography.Text type='tertiary'>{t('并发数')}</Typography.Text>
                 <InputNumber
                   min={1}
                   max={16}
@@ -3307,11 +3312,11 @@ const ChannelsTable = () => {
                       concurrency: num,
                     }));
                   }}
-                  style={{ width: 100 }}
+                  style={{ width: 140 }}
                 />
-              </Space>
-              <Space align='center' style={{ gap: 8 }}>
-                <Typography.Text>{t('请求间隔(ms)')}</Typography.Text>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200, flex: isMobile() ? 'none' : '1' }}>
+                <Typography.Text type='tertiary'>{t('请求间隔(ms)')}</Typography.Text>
                 <InputNumber
                   min={100}
                   max={5000}
@@ -3324,11 +3329,11 @@ const ChannelsTable = () => {
                       intervalMs: num,
                     }));
                   }}
-                  style={{ width: 120 }}
+                  style={{ width: 160 }}
                 />
-              </Space>
-              <Space align='center' style={{ gap: 8 }}>
-                <Typography.Text>{t('最大重试次数')}</Typography.Text>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
+                <Typography.Text type='tertiary'>{t('最大重试次数')}</Typography.Text>
                 <InputNumber
                   min={0}
                   max={5}
@@ -3340,11 +3345,11 @@ const ChannelsTable = () => {
                       retryLimit: num,
                     }));
                   }}
-                  style={{ width: 100 }}
+                  style={{ width: 140 }}
                 />
-              </Space>
-            </Space>
-            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 10 }}>
+              </div>
+            </div>
+            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 12 }}>
               {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
             </Typography.Text>
           </div>
@@ -3414,7 +3419,7 @@ const ChannelsTable = () => {
           <Typography.Text type='tertiary'>
             {t('提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。')}
           </Typography.Text>
-        </Space>
+        </div>
       </Modal>
 
       <Modal
