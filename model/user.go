@@ -294,7 +294,7 @@ func inviteUser(inviterId int) (err error) {
 	// 只有当奖励大于0时才更新奖励相关字段
 	if common.QuotaForInviter > 0 {
 		updateFields["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
-		updateFields["aff_history_quota"] = gorm.Expr("aff_history_quota + ?", common.QuotaForInviter)
+		updateFields["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
 	}
 
 	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(updateFields)
@@ -435,7 +435,7 @@ func (user *User) Insert(inviterId int) error {
 		// 只有当奖励大于0时才更新奖励相关字段
 		if common.QuotaForInviter > 0 {
 			updateFields["aff_quota"] = gorm.Expr("aff_quota + ?", common.QuotaForInviter)
-			updateFields["aff_history_quota"] = gorm.Expr("aff_history_quota + ?", common.QuotaForInviter)
+			updateFields["aff_history"] = gorm.Expr("aff_history + ?", common.QuotaForInviter)
 		}
 
 		// 在事务内原子更新邀请者信息
