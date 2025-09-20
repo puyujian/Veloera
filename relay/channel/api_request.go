@@ -23,107 +23,20 @@ import (
 	"github.com/gorilla/websocket"
 	"io"
 	"net/http"
-	"strings"
 	common2 "veloera/common"
 	"veloera/relay/common"
 	"veloera/relay/constant"
 	"veloera/service"
 )
 
-// 黑名单列表：这些请求头不会被透传
-var headerBlacklist = map[string]bool{
-	// 认证相关
-	"authorization": true,
-	"api-key":       true,
-	"x-api-key":     true,
-	"x-auth-token":  true,
-	"bearer":        true,
-
-	// 连接和传输相关
-	"connection":          true,
-	"keep-alive":          true,
-	"proxy-authenticate":  true,
-	"proxy-authorization": true,
-	"te":                  true,
-	"trailer":             true,
-	"transfer-encoding":   true,
-	"upgrade":             true,
-
-	// 主机和路由相关
-	"host":              true,
-	"forwarded":         true,
-	"x-forwarded-for":   true,
-	"x-forwarded-host":  true,
-	"x-forwarded-proto": true,
-	"x-real-ip":         true,
-
-	// 内容长度（由HTTP库自动处理）
-	"content-length": true,
-
-	// Cookie（可能包含敏感信息）
-	"cookie":     true,
-	"set-cookie": true,
-
-	// 服务器内部头
-	"server":       true,
-	"x-powered-by": true,
-}
-
-// isHeaderAllowed 检查请求头是否允许透传
-func isHeaderAllowed(headerName string) bool {
-	lowerName := strings.ToLower(headerName)
-
-	// 检查黑名单
-	if headerBlacklist[lowerName] {
-		return false
-	}
-
-	// 过滤以下前缀的头部
-	if strings.HasPrefix(lowerName, "x-forwarded-") ||
-		strings.HasPrefix(lowerName, "cf-") ||
-		strings.HasPrefix(lowerName, "cloudfront-") {
-		return false
-	}
-
-	return true
-}
-
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
 	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
-		// multipart/form-data - 透传所有允许的头部
-		for name, values := range c.Request.Header {
-			if isHeaderAllowed(name) {
-				for _, value := range values {
-					req.Add(name, value)
-				}
-			}
-		}
+		// multipart/form-data
 	} else if info.RelayMode == constant.RelayModeRealtime {
-		// websocket - 透传所有允许的头部
-		for name, values := range c.Request.Header {
-			if isHeaderAllowed(name) {
-				for _, value := range values {
-					req.Add(name, value)
-				}
-			}
-		}
+		// websocket
 	} else {
-		// 普通HTTP请求 - 透传所有允许的头部
-		for name, values := range c.Request.Header {
-			if isHeaderAllowed(name) {
-				for _, value := range values {
-					req.Add(name, value)
-				}
-			}
-		}
-
-		// 确保必要的头部存在
-		if c.Request.Header.Get("Content-Type") != "" {
-			req.Set("Content-Type", c.Request.Header.Get("Content-Type"))
-		}
-		if c.Request.Header.Get("Accept") != "" {
-			req.Set("Accept", c.Request.Header.Get("Accept"))
-		}
+		req.Set("Content-Type", c.Request.Header.Get("Content-Type"))
+		req.Set("Accept", c.Request.Header.Get("Accept"))
 		if info.IsStream && c.Request.Header.Get("Accept") == "" {
 			req.Set("Accept", "text/event-stream")
 		}
