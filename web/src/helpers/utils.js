@@ -120,6 +120,14 @@ export function showError(error) {
         case 429:
           Toast.error('错误：请求次数过多，请稍后再试！');
           break;
+        case 403:
+          const cfMitigated = error.response.headers['cf-mitigated'];
+          if (cfMitigated === 'challenge') {
+            Toast.warning('请刷新页面！Cloudflare 需要检查浏览器环境。');
+          } else {
+            Toast.error('错误：权限不足，请联系管理员！');
+          }
+          break;
         case 500:
           Toast.error('错误：服务器内部错误，请联系管理员！');
           break;
