@@ -76,6 +76,14 @@ import EditTagModal from '../pages/Channel/EditTagModal.js';
 import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
+const COMPACT_SCREEN_BREAKPOINT = 1100;
+const getIsCompactScreen = () => {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+  return isMobile() || window.innerWidth < COMPACT_SCREEN_BREAKPOINT;
+};
+
 function renderTimestamp(timestamp) {
   return <>{timestamp2string(timestamp)}</>;
 }
@@ -427,6 +435,7 @@ const ModelTestContent = ({
 
 const ChannelsTable = () => {
   const { t } = useTranslation();
+  const [isCompactScreen, setIsCompactScreen] = useState(() => getIsCompactScreen());
 
   let type2label = undefined;
 
@@ -1710,6 +1719,17 @@ const ChannelsTable = () => {
       );
     }
   };
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsCompactScreen(getIsCompactScreen());
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
 
    useEffect(() => {
     // console.log('default effect')
@@ -3436,29 +3456,41 @@ const ChannelsTable = () => {
           setBatchJobResultsTotal(0);
         }}
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              width: '100%',
+              flexWrap: isCompactScreen ? 'wrap' : 'nowrap',
+              gap: isCompactScreen ? 8 : 16,
+            }}
+          >
             <Button onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
               {t('刷新列表')}
             </Button>
             <Button onClick={() => setShowBatchJobPanel(false)}>{t('关闭')}</Button>
           </div>
         }
-        style={{ width: isMobile() ? '96%' : 1100 }}
+        style={{ width: isCompactScreen ? '96%' : '92vw', maxWidth: 1120 }}
+        bodyStyle={{ padding: isCompactScreen ? '16px 12px' : '24px', maxHeight: '78vh', overflowY: 'auto' }}
       >
         <div
           style={{
-            display: isMobile() ? 'block' : 'flex',
-            gap: '16px',
-            alignItems: isMobile() ? 'stretch' : 'flex-start',
+            display: 'flex',
+            flexDirection: isCompactScreen ? 'column' : 'row',
+            gap: isCompactScreen ? 12 : 20,
+            alignItems: 'stretch',
           }}
         >
           <div
             style={{
-              flex: isMobile() ? 'none' : '1',
-              marginBottom: isMobile() ? 16 : 0,
-              minWidth: 0,
+              flex: isCompactScreen ? 'none' : 1,
+              width: isCompactScreen ? '100%' : '32%',
+              marginBottom: isCompactScreen ? 12 : 0,
+              minWidth: isCompactScreen ? '100%' : 280,
               display: 'flex',
               flexDirection: 'column',
+              maxHeight: isCompactScreen ? 'auto' : '72vh',
             }}
           >
             <div
@@ -3485,23 +3517,24 @@ const ChannelsTable = () => {
                 onClick: () => fetchBatchJobDetail(record.id, { silent: false }),
                 style: { cursor: 'pointer' },
               })}
-              style={{
-                maxHeight: isMobile() ? 240 : 520,
-                overflowY: 'auto',
-                width: '100%',
+              scroll={{
+                y: isCompactScreen ? 220 : 420,
+                x: 'max-content',
               }}
+              style={{ width: '100%' }}
             />
           </div>
 
           <div
             style={{
-              flex: isMobile() ? 'none' : '2',
+              flex: isCompactScreen ? 'none' : 2,
+              width: isCompactScreen ? '100%' : '68%',
               minWidth: 0,
               display: 'flex',
               flexDirection: 'column',
-              gap: 16,
-              maxHeight: isMobile() ? 'none' : '70vh',
-              overflow: isMobile() ? 'visible' : 'hidden',
+              gap: isCompactScreen ? 12 : 16,
+              maxHeight: isCompactScreen ? 'none' : '72vh',
+              overflowY: isCompactScreen ? 'visible' : 'hidden',
             }}
           >
             {activeBatchJob ? (
@@ -3518,7 +3551,7 @@ const ChannelsTable = () => {
                   <Typography.Title heading={6} style={{ margin: 0 }}>
                     {t('任务 #{{id}}', { id: activeBatchJob.id })}
                   </Typography.Title>
-                  <Space>
+                  <Space wrap>
                     <Button size='small' onClick={() => fetchBatchJobDetail(activeBatchJob.id)} loading={batchJobDetailLoading}>
                       {t('刷新')}
                     </Button>
@@ -3527,7 +3560,7 @@ const ChannelsTable = () => {
                     </Button>
                   </Space>
                 </div>
-                <Space size='small'>
+                <Space size='small' wrap>
                   <Typography.Text>{t('状态')}:</Typography.Text>
                   {renderJobStatusTag(activeBatchJob.status)}
                 </Space>
@@ -3651,7 +3684,7 @@ const ChannelsTable = () => {
                 <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
                   {t('测试结果')}
                 </Typography.Text>
-                <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex' }}>
+                <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex', overflow: 'hidden' }}>
                   <Table
                     size='small'
                     loading={batchJobResultsLoading || batchJobDetailLoading}
@@ -3664,7 +3697,11 @@ const ChannelsTable = () => {
                       onPageChange: handleBatchJobResultPageChange,
                       showSizeChanger: false,
                     }}
-                    style={{ width: '100%', overflowY: 'auto', maxHeight: isMobile() ? 240 : '100%' }}
+                    scroll={{
+                      x: 'max-content',
+                      y: isCompactScreen ? 260 : 420,
+                    }}
+                    style={{ width: '100%' }}
                   />
                 </div>
               </div>
