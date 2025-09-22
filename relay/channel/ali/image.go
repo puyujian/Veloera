@@ -14,183 +14,91 @@
 //
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
-package ali
+package service
 
 import (
-	"encoding/json"
-	"errors"
+	"context"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"io"
+	"golang.org/x/net/proxy"
+	"net"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 	"veloera/common"
-	"veloera/dto"
-	relaycommon "veloera/relay/common"
-	"veloera/service"
 )
 
-func oaiImage2Ali(request dto.ImageRequest) *AliImageRequest {
-	var imageRequest AliImageRequest
-	imageRequest.Input.Prompt = request.Prompt
-	imageRequest.Model = request.Model
-	imageRequest.Parameters.Size = strings.Replace(request.Size, "x", "*", -1)
-	imageRequest.Parameters.N = request.N
-	imageRequest.ResponseFormat = request.ResponseFormat
+var httpClient *http.Client
+var impatientHTTPClient *http.Client
 
-	return &imageRequest
+func init() {
+	if common.RelayTimeout == 0 {
+		httpClient = &http.Client{}
+	} else {
+		httpClient = &http.Client{
+			Timeout: time.Duration(common.RelayTimeout) * time.Second,
+		}
+	}
+
+	impatientHTTPClient = &http.Client{
+		Timeout: 5 * time.Second,
+	}
 }
 
-func updateTask(info *relaycommon.RelayInfo, taskID string) (*AliResponse, error, []byte) {
-	url := fmt.Sprintf("%s/api/v1/tasks/%s", info.BaseUrl, taskID)
-
-	var aliResponse AliResponse
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return &aliResponse, err, nil
-	}
-
-	req.Header.Set("Authorization", "Bearer "+info.ApiKey)
-
-    // 设置非零超时，避免请求无限阻塞
-    timeout := time.Duration(common.RelayTimeout) * time.Second
-    if timeout == 0 {
-        timeout = 30 * time.Second
-    }
-    client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
-	if err != nil {
-		common.SysError("updateTask client.Do err: " + err.Error())
-		return &aliResponse, err, nil
-	}
-	defer resp.Body.Close()
-
-	responseBody, err := io.ReadAll(resp.Body)
-
-	var response AliResponse
-	err = json.Unmarshal(responseBody, &response)
-	if err != nil {
-		common.SysError("updateTask NewDecoder err: " + err.Error())
-		return &aliResponse, err, nil
-	}
-
-	return &response, nil, responseBody
+func GetHttpClient() *http.Client {
+	return httpClient
 }
 
-func asyncTaskWait(info *relaycommon.RelayInfo, taskID string) (*AliResponse, []byte, error) {
-	waitSeconds := 3
-	step := 0
-	maxStep := 20
-
-	var taskResponse AliResponse
-	var responseBody []byte
-
-	for {
-		step++
-		rsp, err, body := updateTask(info, taskID)
-		responseBody = body
-		if err != nil {
-			return &taskResponse, responseBody, err
-		}
-
-		if rsp.Output.TaskStatus == "" {
-			return &taskResponse, responseBody, nil
-		}
-
-		switch rsp.Output.TaskStatus {
-		case "FAILED":
-			fallthrough
-		case "CANCELED":
-			fallthrough
-		case "SUCCEEDED":
-			fallthrough
-		case "UNKNOWN":
-			return rsp, responseBody, nil
-		}
-		if step >= maxStep {
-			break
-		}
-		time.Sleep(time.Duration(waitSeconds) * time.Second)
-	}
-
-	return nil, nil, fmt.Errorf("aliAsyncTaskWait timeout")
+func GetImpatientHttpClient() *http.Client {
+	return impatientHTTPClient
 }
 
-func responseAli2OpenAIImage(c *gin.Context, response *AliResponse, info *relaycommon.RelayInfo, responseFormat string) *dto.ImageResponse {
-	imageResponse := dto.ImageResponse{
-		Created: info.StartTime.Unix(),
+// NewProxyHttpClient 创建支持代理的 HTTP 客户端
+func NewProxyHttpClient(proxyURL string) (*http.Client, error) {
+	if proxyURL == "" {
+		return http.DefaultClient, nil
 	}
 
-	for _, data := range response.Output.Results {
-		var b64Json string
-		if responseFormat == "b64_json" {
-			_, b64, err := service.GetImageFromUrl(data.Url)
-			if err != nil {
-				common.LogError(c, "get_image_data_failed: "+err.Error())
-				continue
-			}
-			b64Json = b64
-		} else {
-			b64Json = data.B64Image
-		}
-
-		imageResponse.Data = append(imageResponse.Data, dto.ImageData{
-			Url:           data.Url,
-			B64Json:       b64Json,
-			RevisedPrompt: "",
-		})
-	}
-	return &imageResponse
-}
-
-func aliImageHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.OpenAIErrorWithStatusCode, *dto.Usage) {
-	responseFormat := c.GetString("response_format")
-
-	var aliTaskResponse AliResponse
-	responseBody, err := io.ReadAll(resp.Body)
+	parsedURL, err := url.Parse(proxyURL)
 	if err != nil {
-		return service.OpenAIErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError), nil
-	}
-	err = resp.Body.Close()
-	if err != nil {
-		return service.OpenAIErrorWrapper(err, "close_response_body_failed", http.StatusInternalServerError), nil
-	}
-	err = json.Unmarshal(responseBody, &aliTaskResponse)
-	if err != nil {
-		return service.OpenAIErrorWrapper(err, "unmarshal_response_body_failed", http.StatusInternalServerError), nil
+		return nil, err
 	}
 
-	if aliTaskResponse.Message != "" {
-		common.LogError(c, "ali_async_task_failed: "+aliTaskResponse.Message)
-		return service.OpenAIErrorWrapper(errors.New(aliTaskResponse.Message), "ali_async_task_failed", http.StatusInternalServerError), nil
-	}
-
-	aliResponse, _, err := asyncTaskWait(info, aliTaskResponse.Output.TaskId)
-	if err != nil {
-		return service.OpenAIErrorWrapper(err, "ali_async_task_wait_failed", http.StatusInternalServerError), nil
-	}
-
-	if aliResponse.Output.TaskStatus != "SUCCEEDED" {
-		return &dto.OpenAIErrorWithStatusCode{
-			Error: dto.OpenAIError{
-				Message: aliResponse.Output.Message,
-				Type:    "ali_error",
-				Param:   "",
-				Code:    aliResponse.Output.Code,
+	switch parsedURL.Scheme {
+	case "http", "https":
+		return &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(parsedURL),
 			},
-			StatusCode: resp.StatusCode,
 		}, nil
-	}
 
-	fullTextResponse := responseAli2OpenAIImage(c, aliResponse, info, responseFormat)
-	jsonResponse, err := json.Marshal(fullTextResponse)
-	if err != nil {
-		return service.OpenAIErrorWrapper(err, "marshal_response_body_failed", http.StatusInternalServerError), nil
+	case "socks5":
+		// 获取认证信息
+		var auth *proxy.Auth
+		if parsedURL.User != nil {
+			auth = &proxy.Auth{
+				User:     parsedURL.User.Username(),
+				Password: "",
+			}
+			if password, ok := parsedURL.User.Password(); ok {
+				auth.Password = password
+			}
+		}
+
+		// 创建 SOCKS5 代理拨号器
+		dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, proxy.Direct)
+		if err != nil {
+			return nil, err
+		}
+
+		return &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					return dialer.Dial(network, addr)
+				},
+			},
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported proxy scheme: %s", parsedURL.Scheme)
 	}
-	c.Writer.Header().Set("Content-Type", "application/json")
-	c.Writer.WriteHeader(resp.StatusCode)
-	_, err = c.Writer.Write(jsonResponse)
-	return nil, nil
 }
