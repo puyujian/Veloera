@@ -190,6 +190,47 @@ func ListChannelTestResults(jobID int64, offset, limit int) ([]ChannelTestResult
     return results, total, err
 }
 
+// GetChannelTestResult 根据 ID 查询单条测试结果
+func GetChannelTestResult(resultID int64) (*ChannelTestResult, error) {
+    if resultID <= 0 {
+        return nil, errors.New("invalid result id")
+    }
+    result := &ChannelTestResult{}
+    if err := DB.Where("id = ?", resultID).First(result).Error; err != nil {
+        return nil, err
+    }
+    return result, nil
+}
+
+// UpdateChannelTestResult 更新指定测试结果的字段
+func UpdateChannelTestResult(resultID int64, updates map[string]any) error {
+    if resultID <= 0 {
+        return errors.New("invalid result id")
+    }
+    if len(updates) == 0 {
+        return nil
+    }
+    return DB.Model(&ChannelTestResult{}).Where("id = ?", resultID).Updates(updates).Error
+}
+
+// RefreshChannelTestJobStats 重新统计任务的成功/失败数量
+func RefreshChannelTestJobStats(jobID int64) error {
+    if jobID <= 0 {
+        return errors.New("invalid job id")
+    }
+    success, failure, err := AggregateChannelTestResults(jobID)
+    if err != nil {
+        return err
+    }
+    return DB.Model(&ChannelTestJob{}).
+        Where("id = ?", jobID).
+        Updates(map[string]any{
+            "success_count": int(success),
+            "failure_count": int(failure),
+            "updated_at":    time.Now().Unix(),
+        }).Error
+}
+
 // IncrementChannelTestJobCounters 更新任务计数器
 func IncrementChannelTestJobCounters(jobID int64, channelID int, modelName string, success bool) error {
     if jobID <= 0 {

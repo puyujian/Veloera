@@ -1158,7 +1158,8 @@ const ChannelsTable = () => {
   const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
   const [deletingFailedModels, setDeletingFailedModels] = useState(false);
-  const [dryRunDeleteFailed, setDryRunDeleteFailed] = useState(true);
+  const [showFailedPreview, setShowFailedPreview] = useState(false);
+  const [retryingResultMap, setRetryingResultMap] = useState({});
 
   const removeRecord = (record) => {
     let newDataSource = [...channels];
@@ -1311,7 +1312,7 @@ const ChannelsTable = () => {
 
   const resetBatchTestConfig = () => {
     setBatchTestConfigState({ ...initialBatchTestConfig });
-    setDryRunDeleteFailed(true);
+    setShowFailedPreview(false);
   };
 
   const startBatchChannelTest = async () => {
@@ -1397,9 +1398,12 @@ const ChannelsTable = () => {
     if (!jobId) {
       return;
     }
-    const { silent = false } = options;
+    const { silent = false, page, keepPreview = false } = options;
     if (!silent) {
       setBatchJobDetailLoading(true);
+    }
+    if (!keepPreview) {
+      setShowFailedPreview(false);
     }
     try {
       const res = await API.get(`/api/channel/test/jobs/${jobId}`);
@@ -1407,8 +1411,7 @@ const ChannelsTable = () => {
       if (success) {
         setActiveBatchJob(data?.job || null);
         setBatchJobDetail(data || null);
-        setDryRunDeleteFailed(true);
-        const targetPage = options.page || 1;
+        const targetPage = page || 1;
         await fetchBatchJobResults(jobId, targetPage, batchJobResultsPageSize, true);
         await fetchBatchJobs(true);
       } else if (!silent) {
@@ -1486,62 +1489,168 @@ const ChannelsTable = () => {
     }
   };
 
-  const handleExportBatchJob = (jobId) => {
+  const handleExportBatchJob = async (jobId) => {
     if (!jobId) {
       return;
     }
-    const baseURL = API.defaults?.baseURL || '';
-    const url = `${baseURL}/api/channel/test/jobs/${jobId}/export`;
-    window.open(url, '_blank');
+    try {
+      const res = await API.get(`/api/channel/test/jobs/${jobId}/export`, {
+        responseType: 'blob',
+      });
+      const disposition = res.headers?.['content-disposition'] || '';
+      let filename = `channel-test-report-${jobId}.csv`;
+      const match = disposition.match(/filename=([^;]+)/i);
+      if (match && match[1]) {
+        filename = decodeURIComponent(match[1].replace(/"/g, '').trim());
+      }
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      showSuccess(t('报告导出成功'));
+    } catch (error) {
+      showError(error?.message || t('导出报告失败'));
+    }
   };
 
-  const handleBatchJobDeleteFailedModels = async (jobId) => {
+  const handleBatchJobDeleteFailedModels = (jobId) => {
     if (!jobId) {
       return;
     }
-    setDeletingFailedModels(true);
+    Modal.confirm({
+      title: t('确认删除失败模型'),
+      content: t('此操作将移除本次任务中全部测试失败的模型，操作不可撤销，是否继续？'),
+      okText: t('确认删除'),
+      cancelText: t('取消'),
+      onOk: async () => {
+        setDeletingFailedModels(true);
+        try {
+          const res = await API.post(`/api/channel/test/jobs/${jobId}/delete_failed`, {
+            dry_run: false,
+          });
+          const { success, message, data } = res.data;
+          if (success) {
+            const deleted = data?.deleted || 0;
+            const summary = Array.isArray(data?.summary) ? data.summary : [];
+            showSuccess(
+              t('批量删除失败模型完成，共移除 {{count}} 个模型', {
+                count: deleted,
+              }),
+            );
+            setBatchJobDetail((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              return {
+                ...prev,
+                deleteSummary: summary,
+              };
+            });
+            setShowFailedPreview(false);
+            await refresh();
+            await fetchBatchJobDetail(jobId, { silent: true });
+          } else {
+            showError(message || t('批量删除失败模型失败'));
+          }
+        } catch (error) {
+          showError(error?.message || t('批量删除失败模型失败'));
+        } finally {
+          setDeletingFailedModels(false);
+        }
+      },
+    });
+  };
+
+  const failedResultCount = React.useMemo(
+    () => batchJobResults.filter((item) => !item.success).length,
+    [batchJobResults],
+  );
+
+  const displayedBatchJobResults = React.useMemo(() => {
+    if (!showFailedPreview) {
+      return batchJobResults;
+    }
+    return batchJobResults.filter((item) => !item.success);
+  }, [batchJobResults, showFailedPreview]);
+
+  const toggleFailedPreview = () => {
+    if (!batchJobResults || batchJobResults.length === 0) {
+      showInfo(t('暂无测试结果，无法预览失败模型'));
+      return;
+    }
+    if (!showFailedPreview) {
+      if (failedResultCount === 0) {
+        showInfo(t('当前没有失败的模型'));
+        return;
+      }
+      showInfo(t('已切换到失败模型预览模式'));
+      setShowFailedPreview(true);
+      setBatchJobResultsPage(1);
+      return;
+    }
+    setShowFailedPreview(false);
+  };
+
+  const handleRetrySingleResult = async (record) => {
+    if (!activeBatchJob || !record?.id) {
+      return;
+    }
+    setRetryingResultMap((prev) => ({ ...prev, [record.id]: true }));
     try {
-      const payload = {
-        dry_run: dryRunDeleteFailed,
-      };
-      const res = await API.post(`/api/channel/test/jobs/${jobId}/delete_failed`, payload);
+      const res = await API.post(
+        `/api/channel/test/jobs/${activeBatchJob.id}/results/${record.id}/retry`,
+      );
       const { success, message, data } = res.data;
       if (success) {
-        const summary = Array.isArray(data?.summary) ? data.summary : [];
-        const deleted = data?.deleted || 0;
-        if (dryRunDeleteFailed) {
-          showInfo(
-            t('预览完成，共有 {{count}} 个渠道存在失败模型', {
-              count: summary.length,
-            }),
+        const updatedResult = data?.result;
+        if (updatedResult) {
+          setBatchJobResults((prev) =>
+            prev.map((item) =>
+              item.id === updatedResult.id
+                ? { ...item, ...updatedResult, key: updatedResult.id || item.key }
+                : item,
+            ),
           );
-        } else {
-          showSuccess(
-            t('批量删除失败模型完成，共移除 {{count}} 个模型', {
-              count: deleted,
-            }),
-          );
-          await refresh();
-          await fetchBatchJobDetail(jobId, { silent: true });
         }
-        setBatchJobDetail((prev) => {
-          if (!prev) {
-            return prev;
-          }
-          return {
-            ...prev,
-            deleteSummary: summary,
-          };
+        if (updatedResult?.success) {
+          showSuccess(t('模型重试成功'));
+        } else if (updatedResult) {
+          showWarning(
+            t('模型仍然失败：{{reason}}', {
+              reason: updatedResult.error_message || message || t('请稍后重试'),
+            }),
+          );
+        } else if (message) {
+          showInfo(message);
+        }
+        await fetchBatchJobDetail(activeBatchJob.id, {
+          silent: true,
+          keepPreview: showFailedPreview,
+          page: batchJobResultsPage,
         });
       } else {
-        showError(message || t('批量删除失败模型失败'));
+        showError(message || t('重试失败'));
       }
     } catch (error) {
-      showError(error?.message || t('批量删除失败模型失败'));
+      showError(error?.message || t('重试失败'));
     } finally {
-      setDeletingFailedModels(false);
+      setRetryingResultMap((prev) => {
+        const next = { ...prev };
+        delete next[record.id];
+        return next;
+      });
     }
   };
+
+  const isResultRetrying = React.useCallback(
+    (resultId) => Boolean(retryingResultMap[resultId]),
+    [retryingResultMap],
+  );
 
   const renderJobStatusTag = (status) => {
     const map = {
@@ -1681,6 +1790,26 @@ const ChannelsTable = () => {
         </Typography.Text>
       ),
     },
+    {
+      title: t('操作'),
+      key: 'result_actions',
+      width: 160,
+      render: (_, record) => {
+        if (record.success) {
+          return <Typography.Text type='tertiary'>-</Typography.Text>;
+        }
+        return (
+          <Button
+            size='small'
+            type='primary'
+            loading={isResultRetrying(record.id)}
+            onClick={() => handleRetrySingleResult(record)}
+          >
+            {isResultRetrying(record.id) ? t('重试中') : t('重试')}
+          </Button>
+        );
+      },
+    },
   ];
 
   const copySelectedChannel = async (record) => {
@@ -1774,6 +1903,13 @@ const ChannelsTable = () => {
   }, [showBatchJobPanel]);
 
   useEffect(() => {
+    if (showFailedPreview && failedResultCount === 0) {
+      setShowFailedPreview(false);
+      showSuccess(t('失败模型已全部处理，退出预览模式'));
+    }
+  }, [showFailedPreview, failedResultCount]);
+
+  useEffect(() => {
     if (!showBatchJobPanel || !activeBatchJob) {
       return;
     }
@@ -1787,10 +1923,11 @@ const ChannelsTable = () => {
       fetchBatchJobDetail(activeBatchJob.id, {
         silent: true,
         page: batchJobResultsPage,
+        keepPreview: showFailedPreview,
       });
     }, 5000);
     return () => clearInterval(timer);
-  }, [showBatchJobPanel, activeBatchJob, batchJobResultsPage]);
+  }, [showBatchJobPanel, activeBatchJob, batchJobResultsPage, showFailedPreview]);
 
   // 加载测试结果缓存
   const loadTestResultsCache = () => {
@@ -3640,22 +3777,34 @@ const ChannelsTable = () => {
                   marginBottom: 16,
                   flexWrap: 'wrap',
                 }}>
-                  <Checkbox
-                    checked={dryRunDeleteFailed}
-                    onChange={(e) => setDryRunDeleteFailed(!!e?.target?.checked)}
-                    disabled={activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING'}
-                  >
-                    {t('预览模式（不执行真实删除）')}
-                  </Checkbox>
                   <Button
-                    type='warning'
+                    size='small'
+                    type={showFailedPreview ? 'primary' : 'warning'}
+                    onClick={toggleFailedPreview}
+                    disabled={!showFailedPreview && (batchJobResults.length === 0 || failedResultCount === 0)}
+                  >
+                    {showFailedPreview
+                      ? t('退出失败预览')
+                      : `${t('预览失败模型')} (${failedResultCount})`}
+                  </Button>
+                  <Button
+                    type='danger'
                     size='small'
                     loading={deletingFailedModels}
-                    disabled={activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING'}
+                    disabled={
+                      activeBatchJob.status === 'RUNNING' ||
+                      activeBatchJob.status === 'PENDING' ||
+                      failedResultCount === 0
+                    }
                     onClick={() => handleBatchJobDeleteFailedModels(activeBatchJob.id)}
                   >
-                    {dryRunDeleteFailed ? t('预览失败模型') : t('删除失败模型')}
+                    {t('删除失败模型')}
                   </Button>
+                  {showFailedPreview && (
+                    <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
+                      {t('仅展示失败记录，可直接点击列表中的重试按钮进行单条处理。')}
+                    </Typography.Text>
+                  )}
                 </div>
 
                 {Array.isArray(batchJobDetail?.deleteSummary) && batchJobDetail.deleteSummary.length > 0 && (
@@ -3689,14 +3838,18 @@ const ChannelsTable = () => {
                     size='small'
                     loading={batchJobResultsLoading || batchJobDetailLoading}
                     columns={jobResultColumns}
-                    dataSource={batchJobResults}
-                    pagination={{
-                      currentPage: batchJobResultsPage,
-                      pageSize: batchJobResultsPageSize,
-                      total: batchJobResultsTotal,
-                      onPageChange: handleBatchJobResultPageChange,
-                      showSizeChanger: false,
-                    }}
+                    dataSource={displayedBatchJobResults}
+                    pagination={
+                      showFailedPreview
+                        ? false
+                        : {
+                            currentPage: batchJobResultsPage,
+                            pageSize: batchJobResultsPageSize,
+                            total: batchJobResultsTotal,
+                            onPageChange: handleBatchJobResultPageChange,
+                            showSizeChanger: false,
+                          }
+                    }
                     scroll={{
                       x: 'max-content',
                       y: isCompactScreen ? 260 : 420,

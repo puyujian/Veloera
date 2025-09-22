@@ -3,6 +3,7 @@ package controller
 import (
     "encoding/csv"
     "fmt"
+    "math"
     "net/http"
     "strconv"
     "strings"
@@ -292,6 +293,120 @@ func ExportChannelBatchTestJob(c *gin.Context) {
         }
         offset += batchSize
     }
+}
+
+// RetryChannelBatchTestResult 重新执行单条失败的测试结果
+func RetryChannelBatchTestResult(c *gin.Context) {
+    jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+    if err != nil || jobID <= 0 {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "无效的任务 ID",
+        })
+        return
+    }
+
+    resultID, err := strconv.ParseInt(c.Param("resultId"), 10, 64)
+    if err != nil || resultID <= 0 {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "无效的结果 ID",
+        })
+        return
+    }
+
+    if _, err := model.GetChannelTestJob(jobID); err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": err.Error(),
+        })
+        return
+    }
+
+    result, err := model.GetChannelTestResult(resultID)
+    if err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": err.Error(),
+        })
+        return
+    }
+
+    if result.JobID != jobID {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "结果与任务不匹配",
+        })
+        return
+    }
+
+    channel, err := model.GetChannelById(result.ChannelID, true)
+    if err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("获取渠道信息失败: %v", err),
+        })
+        return
+    }
+
+    consumed, execErr, openAIError := channeltest.ExecuteChannelTest(channel, result.ModelName)
+    durationMillis := int(math.Round(consumed * 1000))
+    retryCount := result.RetryCount + 1
+
+    updates := map[string]any{
+        "duration_millis": durationMillis,
+        "retry_count":     retryCount,
+        "created_at":      time.Now().Unix(),
+    }
+
+    responseMessage := "模型重试成功"
+
+    if execErr != nil {
+        updates["success"] = false
+        if openAIError != nil && openAIError.Error.Message != "" {
+            updates["error_message"] = fmt.Sprintf("%s (code %v)", openAIError.Error.Message, openAIError.Error.Code)
+            responseMessage = fmt.Sprintf("模型重试失败：%s", openAIError.Error.Message)
+        } else {
+            updates["error_message"] = execErr.Error()
+            responseMessage = fmt.Sprintf("模型重试失败：%s", execErr.Error())
+        }
+    } else {
+        updates["success"] = true
+        updates["error_message"] = ""
+    }
+
+    if err := model.UpdateChannelTestResult(resultID, updates); err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("更新结果失败: %v", err),
+        })
+        return
+    }
+
+    if err := model.RefreshChannelTestJobStats(jobID); err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("刷新任务统计失败: %v", err),
+        })
+        return
+    }
+
+    refreshed, err := model.GetChannelTestResult(resultID)
+    if err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("获取更新后的结果失败: %v", err),
+        })
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": responseMessage,
+        "data": gin.H{
+            "result": refreshed,
+        },
+    })
 }
 
 // DeleteFailedModelsByJob 批量删除测试失败的模型

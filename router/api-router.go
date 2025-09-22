@@ -117,6 +117,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/test/jobs/:id/results", controller.GetChannelBatchTestJobResults)
 			channelRoute.POST("/test/jobs/:id/cancel", controller.CancelChannelBatchTestJob)
 			channelRoute.GET("/test/jobs/:id/export", controller.ExportChannelBatchTestJob)
+			channelRoute.POST("/test/jobs/:id/results/:resultId/retry", controller.RetryChannelBatchTestResult)
 			channelRoute.POST("/test/jobs/:id/delete_failed", controller.DeleteFailedModelsByJob)
 			channelRoute.GET("/update_balance", controller.UpdateAllChannelsBalance)
 			channelRoute.GET("/update_balance/:id", controller.UpdateChannelBalance)
