@@ -22,7 +22,14 @@ import { Icon } from '@douyinfe/semi-ui';
 const IDCFlareIcon = (props) => {
   function CustomIcon() {
     return (
-        <svg version="1.2" baseProfile="tiny-ps" width="256" height="256" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+        <svg
+            className='icon'
+            viewBox='0 0 16 16'
+            version='1.1'
+            xmlns='http://www.w3.org/2000/svg'
+            width='1em'
+            height='1em'
+            {...props}>
             <title>IDC Flare</title>
             <circle fill="#A81818" cx="512" cy="512" r="448"/>
             <g transform="translate(252,304)" fill="#fff">
