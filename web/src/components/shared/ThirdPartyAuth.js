@@ -126,7 +126,7 @@ const ThirdPartyAuth = ({
               onLinuxDOOAuthClicked(status.linuxdo_client_id)
             }
           >
-            使用 LinuxDO 继续
+            使用 LINUX DO 继续
           </Button>
         )}
         {status.idcflare_oauth && (
