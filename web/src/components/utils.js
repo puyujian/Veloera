@@ -83,6 +83,17 @@ export async function onLinuxDOOAuthClicked(linuxdo_client_id, openInNewTab = fa
   }
 }
 
+export async function onIDCFlareOAuthClicked(idcflare_client_id, openInNewTab = false) {
+  const state = await getOAuthState();
+  if (!state) return;
+  const url = `https://connect.idcflare.com/oauth2/authorize?response_type=code&client_id=${idcflare_client_id}&state=${state}`;
+  if (openInNewTab) {
+    window.open(url);
+  } else {
+    window.location.href = url;
+  }
+}
+
 let channelModels = undefined;
 export async function loadChannelModels() {
   const res = await API.get('/api/models');

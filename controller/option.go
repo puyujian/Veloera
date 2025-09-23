@@ -85,6 +85,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "IDCFlareOAuthEnabled":
+		if option.Value == "true" && common.IDCFlareClientId == "" {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法启用 IDC Flare OAuth，请先填入 IDC Flare Client Id 以及 IDC Flare Client Secret！",
+			})
+			return
+		}
 	case "EmailDomainRestrictionEnabled":
 		if option.Value == "true" && len(common.EmailDomainWhitelist) == 0 {
 			c.JSON(http.StatusOK, gin.H{
