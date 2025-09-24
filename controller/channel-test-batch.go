@@ -15,21 +15,43 @@ import (
 )
 
 type batchModelTestRequest struct {
-    ChannelIDs       []int    `json:"channel_ids"`
-    IncludeAll       bool     `json:"include_all"`
-    IncludeDisabled  bool     `json:"include_disabled"`
-    ModelScope       string   `json:"model_scope"`
-    ModelWhitelist   []string `json:"model_whitelist"`
-    ModelBlacklist   []string `json:"model_blacklist"`
-    UseChannelDefault bool    `json:"use_channel_default"`
-    Concurrency      int      `json:"concurrency"`
-    IntervalMs       int      `json:"interval_ms"`
-    RetryLimit       int      `json:"retry_limit"`
+    ChannelIDs        []int    `json:"channel_ids"`
+    IncludeAll        bool     `json:"include_all"`
+    IncludeDisabled   bool     `json:"include_disabled"`
+    ModelScope        string   `json:"model_scope"`
+    ModelWhitelist    []string `json:"model_whitelist"`
+    ModelBlacklist    []string `json:"model_blacklist"`
+    TestMode          string   `json:"test_mode"`
+    TargetModels      []string `json:"target_models"`
+    UseChannelDefault bool     `json:"use_channel_default"`
+    Concurrency       int      `json:"concurrency"`
+    IntervalMs        int      `json:"interval_ms"`
+    RetryLimit        int      `json:"retry_limit"`
 }
 
 type batchDeleteFailedRequest struct {
     ChannelIDs []int `json:"channel_ids"`
     DryRun     bool  `json:"dry_run"`
+}
+
+func sanitizeStringList(list []string) []string {
+    if len(list) == 0 {
+        return []string{}
+    }
+    cleaned := make([]string, 0, len(list))
+    seen := make(map[string]struct{})
+    for _, item := range list {
+        trimmed := strings.TrimSpace(item)
+        if trimmed == "" {
+            continue
+        }
+        if _, ok := seen[trimmed]; ok {
+            continue
+        }
+        seen[trimmed] = struct{}{}
+        cleaned = append(cleaned, trimmed)
+    }
+    return cleaned
 }
 
 // StartChannelBatchTest 启动批量模型测试任务
@@ -51,6 +73,22 @@ func StartChannelBatchTest(c *gin.Context) {
         return
     }
 
+    testMode := model.ChannelTestJobMode(strings.ToLower(strings.TrimSpace(req.TestMode)))
+    if testMode != model.ChannelTestJobModeSelected {
+        testMode = model.ChannelTestJobModeAll
+    }
+    whitelist := sanitizeStringList(req.ModelWhitelist)
+    blacklist := sanitizeStringList(req.ModelBlacklist)
+    targetModels := sanitizeStringList(req.TargetModels)
+
+    if testMode == model.ChannelTestJobModeSelected && len(targetModels) == 0 {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "请至少选择一个需要测试的模型",
+        })
+        return
+    }
+
     job := &model.ChannelTestJob{
         RequestedBy: c.GetInt("id"),
         Concurrency: req.Concurrency,
@@ -63,12 +101,14 @@ func StartChannelBatchTest(c *gin.Context) {
     options.ChannelIDs = req.ChannelIDs
     options.IncludeAll = req.IncludeAll
     options.IncludeDisabled = req.IncludeDisabled
-    if strings.TrimSpace(req.ModelScope) != "" {
-        options.ModelScope = strings.TrimSpace(req.ModelScope)
+    if trimmedScope := strings.TrimSpace(req.ModelScope); trimmedScope != "" {
+        options.ModelScope = trimmedScope
     }
-    options.ModelWhitelist = req.ModelWhitelist
-    options.ModelBlacklist = req.ModelBlacklist
+    options.ModelWhitelist = whitelist
+    options.ModelBlacklist = blacklist
     options.UseChannelDefault = req.UseChannelDefault
+    options.TestMode = testMode
+    options.TargetModels = targetModels
 
     if err := job.SetOptions(options); err != nil {
         c.JSON(http.StatusOK, gin.H{

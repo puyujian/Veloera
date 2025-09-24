@@ -412,18 +412,39 @@ func pickModelsForChannel(channel *model.Channel, options model.ChannelTestJobOp
     }
 
     var selected []string
-    switch options.ModelScope {
-    case "default":
-        if defaultModel != "" {
-            selected = []string{defaultModel}
-        } else if len(unique) > 0 {
-            selected = []string{unique[0]}
+    if options.TestMode == model.ChannelTestJobModeSelected && len(options.TargetModels) > 0 {
+        targetSet := make(map[string]struct{}, len(options.TargetModels))
+        for _, item := range options.TargetModels {
+            trimmed := strings.TrimSpace(item)
+            if trimmed == "" {
+                continue
+            }
+            targetSet[trimmed] = struct{}{}
         }
-    default:
-        selected = append(selected, unique...)
-        if options.UseChannelDefault && defaultModel != "" {
-            if _, ok := visited[defaultModel]; !ok {
-                selected = append([]string{defaultModel}, selected...)
+        if defaultModel != "" {
+            if _, ok := targetSet[defaultModel]; ok {
+                selected = append(selected, defaultModel)
+            }
+        }
+        for _, m := range unique {
+            if _, ok := targetSet[m]; ok {
+                selected = append(selected, m)
+            }
+        }
+    } else {
+        switch options.ModelScope {
+        case "default":
+            if defaultModel != "" {
+                selected = []string{defaultModel}
+            } else if len(unique) > 0 {
+                selected = []string{unique[0]}
+            }
+        default:
+            selected = append(selected, unique...)
+            if options.UseChannelDefault && defaultModel != "" {
+                if _, ok := visited[defaultModel]; !ok {
+                    selected = append([]string{defaultModel}, selected...)
+                }
             }
         }
     }
@@ -478,7 +499,7 @@ func pickModelsForChannel(channel *model.Channel, options model.ChannelTestJobOp
         selected = filtered
     }
 
-    if len(selected) == 0 && defaultModel != "" {
+    if len(selected) == 0 && defaultModel != "" && options.TestMode != model.ChannelTestJobModeSelected {
         selected = []string{defaultModel}
     }
 

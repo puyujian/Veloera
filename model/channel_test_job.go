@@ -16,12 +16,19 @@ import (
 // 定义任务状态常量
 type ChannelTestJobStatus string
 
+type ChannelTestJobMode string
+
 const (
     ChannelTestJobStatusPending   ChannelTestJobStatus = "PENDING"
     ChannelTestJobStatusRunning   ChannelTestJobStatus = "RUNNING"
     ChannelTestJobStatusSuccess   ChannelTestJobStatus = "SUCCESS"
     ChannelTestJobStatusFailed    ChannelTestJobStatus = "FAILED"
     ChannelTestJobStatusCanceled  ChannelTestJobStatus = "CANCELED"
+)
+
+const (
+    ChannelTestJobModeAll      ChannelTestJobMode = "all"
+    ChannelTestJobModeSelected ChannelTestJobMode = "selected"
 )
 
 // ChannelTestJob 表示一次批量渠道模型测试任务
@@ -50,13 +57,15 @@ type ChannelTestJob struct {
 
 // ChannelTestJobOptions 记录任务配置，保存在 OptionsJSON 中
 type ChannelTestJobOptions struct {
-    ChannelIDs        []int  `json:"channel_ids"`
-    IncludeAll        bool   `json:"include_all"`
-    IncludeDisabled   bool   `json:"include_disabled"`
-    ModelScope        string `json:"model_scope"`
-    ModelWhitelist    []string `json:"model_whitelist"`
-    ModelBlacklist    []string `json:"model_blacklist"`
-    UseChannelDefault bool   `json:"use_channel_default"`
+    ChannelIDs        []int               `json:"channel_ids"`
+    IncludeAll        bool                `json:"include_all"`
+    IncludeDisabled   bool                `json:"include_disabled"`
+    ModelScope        string              `json:"model_scope"`
+    ModelWhitelist    []string            `json:"model_whitelist"`
+    ModelBlacklist    []string            `json:"model_blacklist"`
+    UseChannelDefault bool                `json:"use_channel_default"`
+    TestMode          ChannelTestJobMode  `json:"test_mode"`
+    TargetModels      []string            `json:"target_models"`
 }
 
 // DefaultChannelTestJobOptions 返回默认配置
@@ -64,6 +73,8 @@ func DefaultChannelTestJobOptions() ChannelTestJobOptions {
     return ChannelTestJobOptions{
         ModelScope:        "all",
         UseChannelDefault: true,
+        TestMode:          ChannelTestJobModeAll,
+        TargetModels:      []string{},
     }
 }
 

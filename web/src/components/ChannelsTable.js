@@ -59,6 +59,7 @@ import {
   Layout,
   Radio,
   RadioGroup,
+  Spin,
 } from '@douyinfe/semi-ui';
 import EditChannel from '../pages/Channel/EditChannel';
 import {
@@ -70,6 +71,7 @@ import {
   IconRefresh,
   IconSetting,
   IconCopy,
+  IconSearch,
 } from '@douyinfe/semi-icons';
 import { loadChannelModels } from './utils.js';
 import EditTagModal from '../pages/Channel/EditTagModal.js';
@@ -77,6 +79,7 @@ import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
 const COMPACT_SCREEN_BREAKPOINT = 1100;
+const CheckboxGroup = Checkbox.Group;
 const getIsCompactScreen = () => {
   if (typeof window === 'undefined') {
     return true;
@@ -1131,7 +1134,7 @@ const ChannelsTable = () => {
   // 批量测试控制
   const [batchTestAbortController, setBatchTestAbortController] = useState(null);
 
-  const initialBatchTestConfig = {
+  const createInitialBatchTestConfig = () => ({
     useSelectedChannels: true,
     includeAll: false,
     includeDisabled: false,
@@ -1142,10 +1145,17 @@ const ChannelsTable = () => {
     concurrency: 2,
     intervalMs: 200,
     retryLimit: 1,
-  };
+    testMode: 'all',
+    selectedModels: [],
+  });
   const [showBatchTestConfig, setShowBatchTestConfig] = useState(false);
   const [startingBatchTest, setStartingBatchTest] = useState(false);
-  const [batchTestConfigState, setBatchTestConfigState] = useState(initialBatchTestConfig);
+  const [batchTestConfigState, setBatchTestConfigState] = useState(
+    createInitialBatchTestConfig,
+  );
+  const [availableModels, setAvailableModels] = useState([]);
+  const [availableModelsLoading, setAvailableModelsLoading] = useState(false);
+  const [modelSelectorKeyword, setModelSelectorKeyword] = useState('');
   const [showBatchJobPanel, setShowBatchJobPanel] = useState(false);
   const [batchJobsLoading, setBatchJobsLoading] = useState(false);
   const [batchJobs, setBatchJobs] = useState([]);
@@ -1155,6 +1165,17 @@ const ChannelsTable = () => {
   const [batchJobResults, setBatchJobResults] = useState([]);
   const [batchJobResultsPage, setBatchJobResultsPage] = useState(1);
   const [batchJobResultsPageSize, setBatchJobResultsPageSize] = useState(20);
+
+  const filteredAvailableModels = React.useMemo(() => {
+    if (!modelSelectorKeyword.trim()) {
+      return availableModels;
+    }
+    const keyword = modelSelectorKeyword.trim().toLowerCase();
+    return availableModels.filter((item) =>
+      item.toLowerCase().includes(keyword),
+    );
+  }, [availableModels, modelSelectorKeyword]);
+
   const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
   const [deletingFailedModels, setDeletingFailedModels] = useState(false);
@@ -1296,6 +1317,23 @@ const ChannelsTable = () => {
       .filter((item) => item.length > 0);
   };
 
+  const sanitizeModelArray = (list) => {
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    const result = [];
+    const seen = new Set();
+    list.forEach((item) => {
+      const trimmed = typeof item === 'string' ? item.trim() : '';
+      if (!trimmed || seen.has(trimmed)) {
+        return;
+      }
+      seen.add(trimmed);
+      result.push(trimmed);
+    });
+    return result;
+  };
+
   const openBatchTestConfigModal = () => {
     setBatchTestConfigState((prev) => ({
       ...prev,
@@ -1311,8 +1349,96 @@ const ChannelsTable = () => {
   };
 
   const resetBatchTestConfig = () => {
-    setBatchTestConfigState({ ...initialBatchTestConfig });
+    setBatchTestConfigState(createInitialBatchTestConfig());
+    setModelSelectorKeyword('');
     setShowFailedPreview(false);
+  };
+
+  const fetchAvailableModels = async () => {
+    if (availableModelsLoading) {
+      return;
+    }
+    setAvailableModelsLoading(true);
+    try {
+      const res = await API.get('/api/models');
+      const { success, data, message } = res.data;
+      if (!success) {
+        showError(message || t('获取模型列表失败'));
+        return;
+      }
+      const parsed = Array.isArray(data)
+        ? data.map((item) => {
+            if (typeof item === 'string') {
+              return item;
+            }
+            if (item && typeof item.id === 'string') {
+              return item.id;
+            }
+            if (item && typeof item.model === 'string') {
+              return item.model;
+            }
+            return '';
+          })
+        : [];
+      const unique = sanitizeModelArray(parsed).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' }),
+      );
+      setAvailableModels(unique);
+    } catch (error) {
+      showError(error?.message || t('获取模型列表失败'));
+    } finally {
+      setAvailableModelsLoading(false);
+    }
+  };
+
+  const handleModelSelectionChange = (values) => {
+    setBatchTestConfigState((prev) => ({
+      ...prev,
+      selectedModels: sanitizeModelArray(values || []),
+    }));
+  };
+
+  const handleSelectAllFilteredModels = () => {
+    if (filteredAvailableModels.length === 0) {
+      return;
+    }
+    setBatchTestConfigState((prev) => {
+      const merged = new Set(prev.selectedModels || []);
+      filteredAvailableModels.forEach((item) => {
+        merged.add(item);
+      });
+      return {
+        ...prev,
+        selectedModels: sanitizeModelArray(Array.from(merged)),
+      };
+    });
+  };
+
+  const handleInvertFilteredModels = () => {
+    if (filteredAvailableModels.length === 0) {
+      return;
+    }
+    setBatchTestConfigState((prev) => {
+      const toggled = new Set(prev.selectedModels || []);
+      filteredAvailableModels.forEach((item) => {
+        if (toggled.has(item)) {
+          toggled.delete(item);
+        } else {
+          toggled.add(item);
+        }
+      });
+      return {
+        ...prev,
+        selectedModels: sanitizeModelArray(Array.from(toggled)),
+      };
+    });
+  };
+
+  const handleClearSelectedModels = () => {
+    setBatchTestConfigState((prev) => ({
+      ...prev,
+      selectedModels: [],
+    }));
   };
 
   const startBatchChannelTest = async () => {
@@ -1332,17 +1458,28 @@ const ChannelsTable = () => {
       return;
     }
 
+    const whitelist = normalizeModelList(config.modelWhitelist);
+    const blacklist = normalizeModelList(config.modelBlacklist);
+    const selectedModels = sanitizeModelArray(config.selectedModels);
+
+    if (config.testMode === 'selected' && selectedModels.length === 0) {
+      showWarning(t('请至少选择一个模型进行测试'));
+      return;
+    }
+
     const payload = {
       channel_ids: channelIds,
       include_all: config.includeAll,
       include_disabled: config.includeDisabled,
       model_scope: config.modelScope,
-      model_whitelist: normalizeModelList(config.modelWhitelist),
-      model_blacklist: normalizeModelList(config.modelBlacklist),
+      model_whitelist: whitelist,
+      model_blacklist: blacklist,
       use_channel_default: config.useChannelDefault,
       concurrency: config.concurrency,
       interval_ms: config.intervalMs,
       retry_limit: config.retryLimit,
+      test_mode: config.testMode,
+      target_models: selectedModels,
     };
 
     setStartingBatchTest(true);
@@ -1901,6 +2038,23 @@ const ChannelsTable = () => {
     }
     fetchBatchJobs(true).then();
   }, [showBatchJobPanel]);
+
+  useEffect(() => {
+    if (!showBatchTestConfig) {
+      return;
+    }
+    if (batchTestConfigState.testMode !== 'selected') {
+      return;
+    }
+    if (availableModels.length === 0 && !availableModelsLoading) {
+      fetchAvailableModels().then();
+    }
+  }, [
+    showBatchTestConfig,
+    batchTestConfigState.testMode,
+    availableModels.length,
+    availableModelsLoading,
+  ]);
 
   useEffect(() => {
     if (showFailedPreview && failedResultCount === 0) {
@@ -3399,10 +3553,10 @@ const ChannelsTable = () => {
               background: 'var(--semi-color-fill-0)',
             }}
           >
-            <Typography.Text strong>{t('模型范围')}</Typography.Text>
+            <Typography.Text strong>{t('测试模式')}</Typography.Text>
             <RadioGroup
               type='button'
-              value={batchTestConfigState.modelScope}
+              value={batchTestConfigState.testMode}
               onChange={(val) => {
                 const value =
                   typeof val === 'string'
@@ -3410,32 +3564,253 @@ const ChannelsTable = () => {
                     : val?.target?.value || val?.value || 'all';
                 setBatchTestConfigState((prev) => ({
                   ...prev,
-                  modelScope: value,
+                  testMode: value,
                 }));
               }}
-              style={{ marginTop: 12, display: 'flex', gap: 8 }}
+              style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}
             >
-              <Radio value='all' style={{ flex: 1 }}>
-                {t('全部模型')}
+              <Radio value='all' style={{ flex: 1, minWidth: 160 }}>
+                {t('全部模型批量测试')}
               </Radio>
-              <Radio value='default' style={{ flex: 1 }}>
-                {t('仅默认测试模型')}
+              <Radio value='selected' style={{ flex: 1, minWidth: 160 }}>
+                {t('指定模型测试')}
               </Radio>
             </RadioGroup>
-            <Checkbox
-              style={{ marginTop: 12, display: 'block' }}
-              checked={batchTestConfigState.useChannelDefault}
-              onChange={(e) => {
-                const checked = !!e?.target?.checked;
-                setBatchTestConfigState((prev) => ({
-                  ...prev,
-                  useChannelDefault: checked,
-                }));
+            <Typography.Text type='tertiary' style={{ marginTop: 12, display: 'block' }}>
+              {t('选择模式决定模型来源，可按需切换。')}
+            </Typography.Text>
+          </div>
+
+          {batchTestConfigState.testMode === 'selected' && (
+            <div
+              style={{
+                padding: '14px 18px',
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 8,
+                background: 'var(--semi-color-fill-0)',
               }}
             >
-              {t('优先使用渠道自定义默认模型')}
-            </Checkbox>
-          </div>
+              <Typography.Text strong>{t('指定模型列表')}</Typography.Text>
+              <div
+                style={{
+                  marginTop: 12,
+                  display: 'flex',
+                  flexDirection: isMobile() ? 'column' : 'row',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  alignItems: isMobile() ? 'stretch' : 'center',
+                }}
+              >
+                <Input
+                  placeholder={t('搜索模型...')}
+                  value={modelSelectorKeyword}
+                  onChange={(v) => setModelSelectorKeyword(v)}
+                  prefix={<IconSearch />}
+                  showClear
+                  style={{ flex: 1, minWidth: isMobile() ? '100%' : 240 }}
+                />
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    size='small'
+                    theme='light'
+                    onClick={handleSelectAllFilteredModels}
+                    disabled={filteredAvailableModels.length === 0}
+                  >
+                    {t('全选当前筛选')}
+                  </Button>
+                  <Button
+                    size='small'
+                    theme='light'
+                    onClick={handleInvertFilteredModels}
+                    disabled={filteredAvailableModels.length === 0}
+                  >
+                    {t('反选当前筛选')}
+                  </Button>
+                  <Button
+                    size='small'
+                    theme='light'
+                    type='danger'
+                    onClick={handleClearSelectedModels}
+                    disabled={batchTestConfigState.selectedModels.length === 0}
+                  >
+                    {t('清空选择')}
+                  </Button>
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Spin spinning={availableModelsLoading}>
+                  {availableModels.length === 0 && !availableModelsLoading ? (
+                    <Typography.Text type='tertiary'>
+                      {t('尚未获取到可用模型，请稍后再试')}
+                    </Typography.Text>
+                  ) : filteredAvailableModels.length === 0 ? (
+                    <Typography.Text type='tertiary'>
+                      {t('未匹配到符合条件的模型')}
+                    </Typography.Text>
+                  ) : (
+                    <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
+                      <CheckboxGroup
+                        value={batchTestConfigState.selectedModels}
+                        onChange={handleModelSelectionChange}
+                      >
+                        {filteredAvailableModels.map((model) => (
+                          <Checkbox
+                            value={model}
+                            key={model}
+                            style={{ display: 'block', marginBottom: 6 }}
+                          >
+                            {model}
+                          </Checkbox>
+                        ))}
+                      </CheckboxGroup>
+                    </div>
+                  )}
+                </Spin>
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {batchTestConfigState.selectedModels.length > 0 ? (
+                  batchTestConfigState.selectedModels.map((model) => (
+                    <Tag
+                      key={model}
+                      size='large'
+                      color='blue'
+                      closable
+                      onClose={() =>
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          selectedModels: prev.selectedModels.filter((item) => item !== model),
+                        }))
+                      }
+                    >
+                      {model}
+                    </Tag>
+                  ))
+                ) : (
+                  <Typography.Text type='tertiary'>
+                    {t('尚未选择模型')}
+                  </Typography.Text>
+                )}
+              </div>
+              <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 12 }}>
+                {t('已选择 {{count}} 个模型（共 {{total}} 个可选）', {
+                  count: batchTestConfigState.selectedModels.length,
+                  total: availableModels.length,
+                })}
+              </Typography.Text>
+            </div>
+          )}
+
+          {batchTestConfigState.testMode === 'all' && (
+            <>
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('模型范围')}</Typography.Text>
+                <RadioGroup
+                  type='button'
+                  value={batchTestConfigState.modelScope}
+                  onChange={(val) => {
+                    const value =
+                      typeof val === 'string'
+                        ? val
+                        : val?.target?.value || val?.value || 'all';
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      modelScope: value,
+                    }));
+                  }}
+                  style={{ marginTop: 12, display: 'flex', gap: 8 }}
+                >
+                  <Radio value='all' style={{ flex: 1 }}>
+                    {t('全部模型')}
+                  </Radio>
+                  <Radio value='default' style={{ flex: 1 }}>
+                    {t('仅默认测试模型')}
+                  </Radio>
+                </RadioGroup>
+                <Checkbox
+                  style={{ marginTop: 12, display: 'block' }}
+                  checked={batchTestConfigState.useChannelDefault}
+                  onChange={(e) => {
+                    const checked = !!e?.target?.checked;
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      useChannelDefault: checked,
+                    }));
+                  }}
+                >
+                  {t('优先使用渠道自定义默认模型')}
+                </Checkbox>
+              </div>
+
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('模型白名单')}</Typography.Text>
+                <textarea
+                  rows={4}
+                  placeholder={t('使用逗号或换行分隔模型名称，可留空')}
+                  value={batchTestConfigState.modelWhitelist}
+                  onChange={(e) =>
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      modelWhitelist: e?.target?.value || '',
+                    }))
+                  }
+                  className='semi-input'
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    border: '1px solid var(--semi-color-border)',
+                    resize: 'vertical',
+                    minHeight: 96,
+                  }}
+                />
+              </div>
+
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
+                <textarea
+                  rows={4}
+                  placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
+                  value={batchTestConfigState.modelBlacklist}
+                  onChange={(e) =>
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      modelBlacklist: e?.target?.value || '',
+                    }))
+                  }
+                  className='semi-input'
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 4,
+                    border: '1px solid var(--semi-color-border)',
+                    resize: 'vertical',
+                    minHeight: 96,
+                  }}
+                />
+              </div>
+            </>
+          )}
 
           <div
             style={{
@@ -3511,74 +3886,11 @@ const ChannelsTable = () => {
             </Typography.Text>
           </div>
 
-          <div
-            style={{
-              padding: '14px 18px',
-              border: '1px solid var(--semi-color-border)',
-              borderRadius: 8,
-              background: 'var(--semi-color-fill-0)',
-            }}
-          >
-            <Typography.Text strong>{t('模型白名单')}</Typography.Text>
-            <textarea
-              rows={4}
-              placeholder={t('使用逗号或换行分隔模型名称，可留空')}
-              value={batchTestConfigState.modelWhitelist}
-              onChange={(e) =>
-                setBatchTestConfigState((prev) => ({
-                  ...prev,
-                  modelWhitelist: e?.target?.value || '',
-                }))
-              }
-              className='semi-input'
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 4,
-                border: '1px solid var(--semi-color-border)',
-                resize: 'vertical',
-                minHeight: 96,
-              }}
-            />
-          </div>
-
-          <div
-            style={{
-              padding: '14px 18px',
-              border: '1px solid var(--semi-color-border)',
-              borderRadius: 8,
-              background: 'var(--semi-color-fill-0)',
-            }}
-          >
-            <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
-            <textarea
-              rows={4}
-              placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
-              value={batchTestConfigState.modelBlacklist}
-              onChange={(e) =>
-                setBatchTestConfigState((prev) => ({
-                  ...prev,
-                  modelBlacklist: e?.target?.value || '',
-                }))
-              }
-              className='semi-input'
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                borderRadius: 4,
-                border: '1px solid var(--semi-color-border)',
-                resize: 'vertical',
-                minHeight: 96,
-              }}
-            />
-          </div>
-
           <Typography.Text type='tertiary'>
             {t('提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。')}
           </Typography.Text>
         </div>
       </Modal>
-
       <Modal
         title={t('批量模型测试任务看板')}
         visible={showBatchJobPanel}
@@ -3753,6 +4065,17 @@ const ChannelsTable = () => {
                       <div>
                         {t('模型范围')}: {batchJobDetail.options.model_scope === 'default' ? t('仅默认测试模型') : t('全部模型')}
                       </div>
+                      <div>
+                        {t('测试模式')}: {batchJobDetail.options.test_mode === 'selected' ? t('指定模型测试') : t('全部模型批量测试')}
+                      </div>
+                      {batchJobDetail.options.test_mode === 'selected' && Array.isArray(batchJobDetail.options.target_models) && (
+                        <div>
+                          {t('指定模型')}: {' '}
+                          {batchJobDetail.options.target_models.length > 0
+                            ? batchJobDetail.options.target_models.join(', ')
+                            : t('无')}
+                        </div>
+                      )}
                       <div>
                         {t('包含禁用渠道')}: {batchJobDetail.options.include_disabled ? t('是') : t('否')}
                       </div>
