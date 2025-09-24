@@ -1364,26 +1364,27 @@ const ChannelsTable = () => {
       const { success, data, message } = res.data;
       if (!success) {
         showError(message || t('获取模型列表失败'));
-        return;
+        // 移除这里的return，让代码继续执行到finally块
+      } else {
+        const parsed = Array.isArray(data)
+          ? data.map((item) => {
+              if (typeof item === 'string') {
+                return item;
+              }
+              if (item && typeof item.id === 'string') {
+                return item.id;
+              }
+              if (item && typeof item.model === 'string') {
+                return item.model;
+              }
+              return '';
+            })
+          : [];
+        const unique = sanitizeModelArray(parsed).sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: 'base' }),
+        );
+        setAvailableModels(unique);
       }
-      const parsed = Array.isArray(data)
-        ? data.map((item) => {
-            if (typeof item === 'string') {
-              return item;
-            }
-            if (item && typeof item.id === 'string') {
-              return item.id;
-            }
-            if (item && typeof item.model === 'string') {
-              return item.model;
-            }
-            return '';
-          })
-        : [];
-      const unique = sanitizeModelArray(parsed).sort((a, b) =>
-        a.localeCompare(b, undefined, { sensitivity: 'base' }),
-      );
-      setAvailableModels(unique);
     } catch (error) {
       showError(error?.message || t('获取模型列表失败'));
     } finally {
