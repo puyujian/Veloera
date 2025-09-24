@@ -2054,7 +2054,6 @@ const ChannelsTable = () => {
     showBatchTestConfig,
     batchTestConfigState.testMode,
     availableModels.length,
-    availableModelsLoading,
   ]);
 
   useEffect(() => {
