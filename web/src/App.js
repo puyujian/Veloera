@@ -205,6 +205,14 @@ function App() {
           }
         />
         <Route
+          path='/oauth/idcflare'
+          element={
+            <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+              <OAuth2Callback type='idcflare'></OAuth2Callback>
+            </Suspense>
+          }
+        />
+        <Route
           path='/admin/settings'
           element={
             <PrivateRoute>
