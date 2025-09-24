@@ -24,10 +24,12 @@ import {
   onGitHubOAuthClicked,
   onOIDCClicked,
   onLinuxDOOAuthClicked,
+  onIDCFlareOAuthClicked,
 } from '../utils';
 import OIDCIcon from '../OIDCIcon.js';
 import WeChatIcon from '../WeChatIcon';
 import LinuxDoIcon from '../LinuxDoIcon.js';
+import IDCFlareIcon from '../IDCFlareIcon.js';
 import { useTranslation } from 'react-i18next';
 
 const ThirdPartyAuth = ({ 
@@ -41,7 +43,8 @@ const ThirdPartyAuth = ({
     status.oidc_enabled ||
     status.wechat_login ||
     status.telegram_oauth ||
-    status.linuxdo_oauth;
+    status.linuxdo_oauth ||
+    status.idcflare_oauth;
 
   if (!hasThirdPartyAuth) {
     return null;
@@ -123,7 +126,28 @@ const ThirdPartyAuth = ({
               onLinuxDOOAuthClicked(status.linuxdo_client_id)
             }
           >
-            使用 LinuxDO 继续
+            使用 LINUX DO 继续
+          </Button>
+        )}
+        {status.idcflare_oauth && (
+          <Button
+            type='tertiary'
+            theme='borderless'
+            size='large'
+            style={{
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: '6px',
+              padding: '12px 16px',
+              width: '100%',
+              justifyContent: 'center',
+              position: 'relative',
+            }}
+            icon={<IDCFlareIcon style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)' }} />}
+            onClick={() =>
+              onIDCFlareOAuthClicked(status.idcflare_client_id)
+            }
+          >
+            使用 IDC Flare 继续
           </Button>
         )}
         {status.wechat_login && (

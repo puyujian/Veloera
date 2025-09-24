@@ -56,6 +56,7 @@ type User struct {
 	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
 	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	IDCFlareId       string         `json:"idc_flare_id" gorm:"column:idc_flare_id;index"`
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	LastCheckInTime  *time.Time     `json:"last_check_in_time" gorm:"column:last_check_in_time"` // 上次签到时间
 }
@@ -938,6 +939,20 @@ func GetUsernameById(id int, fromDB bool) (username string, err error) {
 	}
 
 	return username, nil
+}
+
+func IsIDCFlareIdAlreadyTaken(idcFlareId string) bool {
+	var user User
+	err := DB.Unscoped().Where("idc_flare_id = ?", idcFlareId).First(&user).Error
+	return !errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+func (user *User) FillUserByIDCFlareId() error {
+	if user.IDCFlareId == "" {
+		return errors.New("idc flare id is empty")
+	}
+	err := DB.Where("idc_flare_id = ?", user.IDCFlareId).First(user).Error
+	return err
 }
 
 func IsLinuxDOIdAlreadyTaken(linuxDOId string) bool {

@@ -52,6 +52,7 @@ func InitOptionMap() {
 	common.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(common.EmailVerificationEnabled)
 	common.OptionMap["GitHubOAuthEnabled"] = strconv.FormatBool(common.GitHubOAuthEnabled)
 	common.OptionMap["LinuxDOOAuthEnabled"] = strconv.FormatBool(common.LinuxDOOAuthEnabled)
+	common.OptionMap["IDCFlareOAuthEnabled"] = strconv.FormatBool(common.IDCFlareOAuthEnabled)
 	common.OptionMap["TelegramOAuthEnabled"] = strconv.FormatBool(common.TelegramOAuthEnabled)
 	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
 	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
@@ -104,6 +105,9 @@ func InitOptionMap() {
 	common.OptionMap["LinuxDOClientId"] = ""
 	common.OptionMap["LinuxDOClientSecret"] = ""
 	common.OptionMap["LinuxDOMinimumTrustLevel"] = strconv.Itoa(common.LinuxDOMinimumTrustLevel)
+	common.OptionMap["IDCFlareClientId"] = ""
+	common.OptionMap["IDCFlareClientSecret"] = ""
+	common.OptionMap["IDCFlareMinimumTrustLevel"] = strconv.Itoa(common.IDCFlareMinimumTrustLevel)
 	common.OptionMap["TelegramBotToken"] = ""
 	common.OptionMap["TelegramBotName"] = ""
 	common.OptionMap["WeChatServerAddress"] = ""
@@ -249,6 +253,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.GitHubOAuthEnabled = boolValue
 		case "LinuxDOOAuthEnabled":
 			common.LinuxDOOAuthEnabled = boolValue
+		case "IDCFlareOAuthEnabled":
+			common.IDCFlareOAuthEnabled = boolValue
 		case "WeChatAuthEnabled":
 			common.WeChatAuthEnabled = boolValue
 		case "TelegramOAuthEnabled":
@@ -369,6 +375,12 @@ func updateOptionMap(key string, value string) (err error) {
 		common.LinuxDOClientSecret = value
 	case "LinuxDOMinimumTrustLevel":
 		common.LinuxDOMinimumTrustLevel, _ = strconv.Atoi(value)
+	case "IDCFlareClientId":
+		common.IDCFlareClientId = value
+	case "IDCFlareClientSecret":
+		common.IDCFlareClientSecret = value
+	case "IDCFlareMinimumTrustLevel":
+		common.IDCFlareMinimumTrustLevel, _ = strconv.Atoi(value)
 	case "Footer":
 		common.Footer = value
 	case "SystemName":

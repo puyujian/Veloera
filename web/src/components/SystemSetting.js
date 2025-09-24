@@ -91,6 +91,10 @@ const SystemSetting = () => {
     LinuxDOClientId: '',
     LinuxDOClientSecret: '',
     LinuxDOMinimumTrustLevel: '',
+    IDCFlareOAuthEnabled: '',
+    IDCFlareClientId: '',
+    IDCFlareClientSecret: '',
+    IDCFlareMinimumTrustLevel: '',
     // reverse proxy settings
     ReverseProxyEnabled: '',
     ReverseProxyProvider: '',
@@ -104,6 +108,7 @@ const SystemSetting = () => {
   const [showPasswordLoginConfirmModal, setShowPasswordLoginConfirmModal] =
     useState(false);
   const [linuxDOOAuthEnabled, setLinuxDOOAuthEnabled] = useState(false);
+  const [idcFlareOAuthEnabled, setIDCFlareOAuthEnabled] = useState(false);
   const [emailToAdd, setEmailToAdd] = useState('');
 
   const getOptions = async () => {
@@ -132,6 +137,7 @@ const SystemSetting = () => {
           case 'EmailAliasRestrictionEnabled':
           case 'SMTPSSLEnabled':
           case 'LinuxDOOAuthEnabled':
+          case 'IDCFlareOAuthEnabled':
           case 'ReverseProxyEnabled':
           case 'oidc.enabled':
             item.value = item.value === 'true';
@@ -525,6 +531,33 @@ const SystemSetting = () => {
     }
   };
 
+  const submitIDCFlareOAuth = async () => {
+    const options = [];
+
+    if (originInputs['IDCFlareClientId'] !== inputs.IDCFlareClientId) {
+      options.push({ key: 'IDCFlareClientId', value: inputs.IDCFlareClientId });
+    }
+    if (
+      originInputs['IDCFlareClientSecret'] !== inputs.IDCFlareClientSecret &&
+      inputs.IDCFlareClientSecret !== ''
+    ) {
+      options.push({
+        key: 'IDCFlareClientSecret',
+        value: inputs.IDCFlareClientSecret,
+      });
+    }
+    if (originInputs['IDCFlareMinimumTrustLevel'] !== inputs.IDCFlareMinimumTrustLevel) {
+      options.push({
+        key: 'IDCFlareMinimumTrustLevel',
+        value: inputs.IDCFlareMinimumTrustLevel.toString(),
+      });
+    }
+
+    if (options.length > 0) {
+      await updateOptions(options);
+    }
+  };
+
   const submitReverseProxy = async () => {
     const options = [];
 
@@ -550,6 +583,9 @@ const SystemSetting = () => {
     }
     if (optionKey === 'LinuxDOOAuthEnabled') {
       setLinuxDOOAuthEnabled(value);
+    }
+    if (optionKey === 'IDCFlareOAuthEnabled') {
+      setIDCFlareOAuthEnabled(value);
     }
   };
 
@@ -796,6 +832,15 @@ const SystemSetting = () => {
                         }
                       >
                         允许通过 Linux DO 账户登录 & 注册
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='IDCFlareOAuthEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('IDCFlareOAuthEnabled', e)
+                        }
+                      >
+                        允许通过 IDC Flare 账户登录 & 注册
                       </Form.Checkbox>
                       <Form.Checkbox
                         field='WeChatAuthEnabled'
@@ -1092,6 +1137,63 @@ const SystemSetting = () => {
                   </Row>
                   <Button onClick={submitLinuxDOOAuth}>
                     保存 Linux DO OAuth 设置
+                  </Button>
+                </Form.Section>
+              </Card>
+
+              <Card>
+                <Form.Section text='配置 IDC Flare OAuth'>
+                  <Text>
+                    用以支持通过 IDC Flare 进行登录注册
+                    <a
+                      href='https://connect.idcflare.com/'
+                      target='_blank'
+                      rel='noreferrer'
+                      style={{
+                        display: 'inline-block',
+                        marginLeft: 4,
+                        marginRight: 4,
+                      }}
+                    >
+                      点击此处
+                    </a>
+                    管理你的 IDC Flare OAuth App
+                  </Text>
+                  <Banner
+                    type='info'
+                    description={`回调 URL 填 ${inputs.ServerAddress ? inputs.ServerAddress : '网站地址'}/oauth/idcflare`}
+                    style={{ marginBottom: 20, marginTop: 16 }}
+                  />
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                  >
+                    <Col xs={24} sm={24} md={10} lg={10} xl={10}>
+                      <Form.Input
+                        field='IDCFlareClientId'
+                        label='IDC Flare Client ID'
+                        placeholder='输入你注册的 IDC Flare OAuth APP 的 ID'
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={10} lg={10} xl={10}>
+                      <Form.Input
+                        field='IDCFlareClientSecret'
+                        label='IDC Flare Client Secret'
+                        type='password'
+                        placeholder='敏感信息不会发送到前端显示'
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={4} lg={4} xl={4}>
+                      <Form.InputNumber
+                        field='IDCFlareMinimumTrustLevel'
+                        label='IDC Flare Minimum Trust Level'
+                        placeholder='允许注册的最低信任等级'
+                        min={0}
+                        max={4}
+                      />
+                    </Col>
+                  </Row>
+                  <Button onClick={submitIDCFlareOAuth}>
+                    保存 IDC Flare OAuth 设置
                   </Button>
                 </Form.Section>
               </Card>
