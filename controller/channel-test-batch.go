@@ -144,6 +144,32 @@ func StartChannelBatchTest(c *gin.Context) {
     })
 }
 
+// GetChannelTestAvailableModels 获取批量测试可选模型列表
+func GetChannelTestAvailableModels(c *gin.Context) {
+	includeDisabled := false
+	raw := strings.TrimSpace(c.Query("include_disabled"))
+	if raw != "" {
+		lower := strings.ToLower(raw)
+		if lower == "1" || lower == "true" || lower == "yes" {
+			includeDisabled = true
+		}
+	}
+
+	models, err := model.GetAllChannelModels(includeDisabled)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("获取模型列表失败: %v", err),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    models,
+	})
+}
+
 // GetChannelBatchTestJobs 返回最近的批量模型测试任务列表
 func GetChannelBatchTestJobs(c *gin.Context) {
     limit, _ := strconv.Atoi(c.Query("limit"))

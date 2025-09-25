@@ -1369,44 +1369,22 @@ const ChannelsTable = () => {
     }
     setAvailableModelsLoading(true);
     try {
-      const res = await API.get('/api/models');
+      const res = await API.get('/api/channel/test/models', {
+        params: {
+          include_disabled: true,
+        },
+      });
       const { success, data, message } = res.data;
       if (!success) {
         showError(message || t('获取模型列表失败'));
-        // 移除这里的return，让代码继续执行到finally块
       } else {
-        let parsed = [];
-
-        // 处理数组格式的响应
+        let candidates = [];
         if (Array.isArray(data)) {
-          parsed = data.map((item) => {
-            if (typeof item === 'string') {
-              return item;
-            }
-            if (item && typeof item.id === 'string') {
-              return item.id;
-            }
-            if (item && typeof item.model === 'string') {
-              return item.model;
-            }
-            return '';
-          });
+          candidates = data;
+        } else if (data && Array.isArray(data.models)) {
+          candidates = data.models;
         }
-        // 处理对象格式的响应 (渠道ID -> 模型数组)
-        else if (data && typeof data === 'object' && data !== null) {
-          const allModels = [];
-          Object.keys(data).forEach(channelId => {
-            const channelModels = data[channelId];
-            if (Array.isArray(channelModels)) {
-              allModels.push(...channelModels.filter(model =>
-                typeof model === 'string' && model.trim().length > 0
-              ));
-            }
-          });
-          parsed = allModels;
-        }
-
-        const unique = sanitizeModelArray(parsed).sort((a, b) =>
+        const unique = sanitizeModelArray(candidates).sort((a, b) =>
           a.localeCompare(b, undefined, { sensitivity: 'base' }),
         );
         setAvailableModels(unique);

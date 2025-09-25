@@ -112,6 +112,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/:id", controller.GetChannel)
 			channelRoute.GET("/test", controller.TestAllChannels)
 			channelRoute.GET("/test/:id", controller.TestChannel)
+			channelRoute.GET("/test/models", controller.GetChannelTestAvailableModels)
 			channelRoute.POST("/test/batch", controller.StartChannelBatchTest)
 			channelRoute.GET("/test/jobs", controller.GetChannelBatchTestJobs)
 			channelRoute.GET("/test/jobs/:id", controller.GetChannelBatchTestJob)
