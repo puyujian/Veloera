@@ -90,7 +90,7 @@ const getIsCompactScreen = () => {
 };
 
 function renderTimestamp(timestamp) {
-  return <>{timestamp2string(timestamp)}</>;
+  return <React.Fragment>{timestamp2string(timestamp)}</React.Fragment>;
 }
 
 // 辅助函数：获取失败的模型统计
@@ -224,7 +224,7 @@ const ModelTestContent = ({
           gap: '12px'
         }}>
           {!isBatchTesting && (
-            <>
+            <React.Fragment>
               <Typography.Text style={{ fontSize: '14px' }}>
                 {t('并发测试模型数')}:
               </Typography.Text>
@@ -236,7 +236,7 @@ const ModelTestContent = ({
                 style={{ width: '80px' }}
                 size='small'
               />
-            </>
+            </React.Fragment>
           )}
           
           <Button
@@ -666,11 +666,11 @@ const ChannelsTable = () => {
       title: t('类型'),
       dataIndex: 'type',
       render: (text, record, index) => {
-        if (record.children === undefined) {
-          return <>{renderType(text)}</>;
-        } else {
-          return <>{renderTagType()}</>;
-        }
+          if (record.children === undefined) {
+            return <React.Fragment>{renderType(text)}</React.Fragment>;
+          } else {
+            return <React.Fragment>{renderTagType()}</React.Fragment>;
+          }
       },
     },
     {
@@ -774,7 +774,7 @@ const ChannelsTable = () => {
           );
         } else {
           return (
-            <>
+            <React.Fragment>
               <InputNumber
                 style={{ width: 70 }}
                 name='priority'
@@ -801,7 +801,7 @@ const ChannelsTable = () => {
                 defaultValue={record.priority}
                 min={-999}
               />
-            </>
+            </React.Fragment>
           );
         }
       },
@@ -955,7 +955,7 @@ const ChannelsTable = () => {
           );
         } else {
           return (
-            <>
+            <React.Fragment>
               <Button
                 theme='light'
                 type='secondary'
@@ -987,7 +987,7 @@ const ChannelsTable = () => {
               >
                 {t('编辑')}
               </Button>
-            </>
+            </React.Fragment>
           );
         }
       },
@@ -1007,7 +1007,7 @@ const ChannelsTable = () => {
         visible={showColumnSelector}
         onCancel={() => setShowColumnSelector(false)}
         footer={
-          <>
+          <React.Fragment>
             <Button onClick={() => initDefaultColumns()}>{t('重置')}</Button>
             <Button onClick={() => setShowColumnSelector(false)}>
               {t('取消')}
@@ -1015,7 +1015,7 @@ const ChannelsTable = () => {
             <Button type='primary' onClick={() => setShowColumnSelector(false)}>
               {t('确定')}
             </Button>
-          </>
+          </React.Fragment>
         }
         style={{ width: isMobile() ? '90%' : 500 }}
         bodyStyle={{ padding: '24px' }}
@@ -3352,7 +3352,7 @@ const ChannelsTable = () => {
   };
 
   return (
-    <>
+    <React.Fragment>
       {renderColumnSelector()}
       <EditTagModal
         visible={showEditTag}
@@ -3864,7 +3864,7 @@ const ChannelsTable = () => {
           </div>
 
           {isQuickBatchConfig && (
-            <>
+            <React.Fragment>
               <div
                 style={{
                   padding: '14px 18px',
@@ -4045,11 +4045,11 @@ const ChannelsTable = () => {
               <Typography.Text type='tertiary' style={{ display: 'block' }}>
                 {t('快速模式默认使用渠道配置的模型列表与默认模型，适合快速巡检任务。')}
               </Typography.Text>
-            </>
+            </React.Fragment>
           )}
 
           {!isQuickBatchConfig && (
-            <>
+            <React.Fragment>
               <div
                 style={{
                   padding: '14px 18px',
@@ -4279,9 +4279,9 @@ const ChannelsTable = () => {
           </div>
 
           {showAdvancedBatchConfig && (
-            <>
+            <React.Fragment>
               {batchTestConfigState.testMode === 'all' && (
-                <>
+                <React.Fragment>
                   <div
                     style={{
                       padding: '14px 18px',
@@ -4389,7 +4389,7 @@ const ChannelsTable = () => {
                       }}
                     />
                   </div>
-                </>
+                </React.Fragment>
               )}
 
               <div
@@ -4465,8 +4465,11 @@ const ChannelsTable = () => {
                   {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
                 </Typography.Text>
               </div>
-            </>
+            </React.Fragment>
           )}
+
+          </React.Fragment>
+        )}
 
           <Typography.Text type='tertiary'>
             {t('提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。')}
@@ -4735,7 +4738,7 @@ const ChannelsTable = () => {
       </Modal>
 
 
-    </>
+    </React.Fragment>
   );
 };
 
