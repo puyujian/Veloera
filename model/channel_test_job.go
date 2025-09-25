@@ -31,6 +31,12 @@ const (
     ChannelTestJobModeSelected ChannelTestJobMode = "selected"
 )
 
+const (
+    ChannelTestResultStatusSuccess = "SUCCESS"
+    ChannelTestResultStatusFailed  = "FAILED"
+    ChannelTestResultStatusDeleted = "DELETED"
+)
+
 // ChannelTestJob 表示一次批量渠道模型测试任务
 type ChannelTestJob struct {
     ID              int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
@@ -114,6 +120,7 @@ type ChannelTestResult struct {
     ChannelName    string `json:"channel_name" gorm:"type:varchar(255)"`
     ModelName      string `json:"model_name" gorm:"type:varchar(255);index"`
     Success        bool   `json:"success" gorm:"index"`
+    ResultStatus   string `json:"result_status" gorm:"type:varchar(20);index"`
     DurationMillis int    `json:"duration_millis"`
     RetryCount     int    `json:"retry_count"`
     ErrorMessage   string `json:"error_message" gorm:"type:text"`
@@ -179,6 +186,13 @@ func AddChannelTestResult(result *ChannelTestResult) error {
     if result.JobID == 0 {
         return errors.New("job id is zero")
     }
+    if strings.TrimSpace(result.ResultStatus) == "" {
+        if result.Success {
+            result.ResultStatus = ChannelTestResultStatusSuccess
+        } else {
+            result.ResultStatus = ChannelTestResultStatusFailed
+        }
+    }
     result.CreatedAt = time.Now().Unix()
     return DB.Create(result).Error
 }
@@ -222,6 +236,18 @@ func UpdateChannelTestResult(resultID int64, updates map[string]any) error {
         return nil
     }
     return DB.Model(&ChannelTestResult{}).Where("id = ?", resultID).Updates(updates).Error
+}
+
+// MarkChannelTestResultsDeleted 批量将结果标记为已删除
+func MarkChannelTestResultsDeleted(resultIDs []int64) error {
+    if len(resultIDs) == 0 {
+        return nil
+    }
+    return DB.Model(&ChannelTestResult{}).
+        Where("id IN ?", resultIDs).
+        Updates(map[string]any{
+            "result_status": ChannelTestResultStatusDeleted,
+        }).Error
 }
 
 // RefreshChannelTestJobStats 重新统计任务的成功/失败数量
@@ -286,7 +312,7 @@ func AggregateChannelTestResults(jobID int64) (success, failure int64, err error
     var agg []aggResult
     err = DB.Model(&ChannelTestResult{}).
         Select("success, COUNT(*) as total").
-        Where("job_id = ?", jobID).
+        Where("job_id = ? AND (result_status IS NULL OR result_status != ?)", jobID, ChannelTestResultStatusDeleted).
         Group("success").
         Find(&agg).Error
     if err != nil {

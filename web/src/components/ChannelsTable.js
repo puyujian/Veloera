@@ -60,6 +60,8 @@ import {
   Radio,
   RadioGroup,
   Spin,
+  Tabs,
+  Slider,
 } from '@douyinfe/semi-ui';
 import EditChannel from '../pages/Channel/EditChannel';
 import {
@@ -1151,6 +1153,7 @@ const ChannelsTable = () => {
   const [batchTestConfigState, setBatchTestConfigState] = useState(
     createInitialBatchTestConfig,
   );
+  const [batchTestConfigMode, setBatchTestConfigMode] = useState('quick');
   const [showAdvancedBatchConfig, setShowAdvancedBatchConfig] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [availableModelsLoading, setAvailableModelsLoading] = useState(false);
@@ -1164,6 +1167,9 @@ const ChannelsTable = () => {
   const [batchJobResults, setBatchJobResults] = useState([]);
   const [batchJobResultsPage, setBatchJobResultsPage] = useState(1);
   const [batchJobResultsPageSize, setBatchJobResultsPageSize] = useState(20);
+  const [batchJobPanelTab, setBatchJobPanelTab] = useState('list');
+
+  const isQuickBatchConfig = batchTestConfigMode === 'quick';
 
   const filteredAvailableModels = React.useMemo(() => {
     if (!modelSelectorKeyword.trim()) {
@@ -1174,6 +1180,27 @@ const ChannelsTable = () => {
       item.toLowerCase().includes(keyword),
     );
   }, [availableModels, modelSelectorKeyword]);
+
+  useEffect(() => {
+    if (batchTestConfigMode === 'quick') {
+      setBatchTestConfigState((prev) => ({
+        ...prev,
+        testMode: 'all',
+        modelScope: 'all',
+        modelWhitelist: '',
+        modelBlacklist: '',
+        useChannelDefault: true,
+        selectedModels: [],
+      }));
+    }
+  }, [batchTestConfigMode]);
+
+  const quickScopeValue = React.useMemo(
+    () => (batchTestConfigState.channelScope === 'selected' ? 'selected' : 'all'),
+    [batchTestConfigState.channelScope],
+  );
+  const quickIncludeDisabled =
+    batchTestConfigState.channelScope === 'allWithDisabled';
 
   const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
@@ -1347,6 +1374,7 @@ const ChannelsTable = () => {
         channelScope: nextScope,
       };
     });
+    setBatchTestConfigMode('quick');
     setShowAdvancedBatchConfig(false);
     setShowBatchTestConfig(true);
   };
@@ -1358,6 +1386,7 @@ const ChannelsTable = () => {
 
   const resetBatchTestConfig = () => {
     setBatchTestConfigState(createInitialBatchTestConfig());
+    setBatchTestConfigMode('quick');
     setModelSelectorKeyword('');
     setShowFailedPreview(false);
     setShowAdvancedBatchConfig(false);
@@ -1710,7 +1739,10 @@ const ChannelsTable = () => {
   };
 
   const failedResultCount = React.useMemo(
-    () => batchJobResults.filter((item) => !item.success).length,
+    () =>
+      batchJobResults.filter(
+        (item) => !item.success && item.result_status !== 'DELETED',
+      ).length,
     [batchJobResults],
   );
 
@@ -1718,7 +1750,9 @@ const ChannelsTable = () => {
     if (!showFailedPreview) {
       return batchJobResults;
     }
-    return batchJobResults.filter((item) => !item.success);
+    return batchJobResults.filter(
+      (item) => !item.success && item.result_status !== 'DELETED',
+    );
   }, [batchJobResults, showFailedPreview]);
 
   const toggleFailedPreview = () => {
@@ -1902,13 +1936,16 @@ const ChannelsTable = () => {
       title: t('状态'),
       dataIndex: 'success',
       key: 'success',
-      width: 100,
-      render: (_, record) =>
-        record.success ? (
-          <Tag color='green'>{t('成功')}</Tag>
-        ) : (
-          <Tag color='red'>{t('失败')}</Tag>
-        ),
+      width: 120,
+      render: (_, record) => {
+        if (record.result_status === 'DELETED') {
+          return <Tag color='grey'>{t('已删除')}</Tag>;
+        }
+        if (record.success) {
+          return <Tag color='green'>{t('成功')}</Tag>;
+        }
+        return <Tag color='red'>{t('失败')}</Tag>;
+      },
     },
     {
       title: t('耗时'),
@@ -1938,6 +1975,9 @@ const ChannelsTable = () => {
       key: 'result_actions',
       width: 160,
       render: (_, record) => {
+        if (record.result_status === 'DELETED') {
+          return <Typography.Text type='tertiary'>{t('已删除')}</Typography.Text>;
+        }
         if (record.success) {
           return <Typography.Text type='tertiary'>-</Typography.Text>;
         }
@@ -1954,6 +1994,282 @@ const ChannelsTable = () => {
       },
     },
   ];
+
+  const renderBatchJobListPanel = (compact = false) => {
+    const scrollY = compact ? 320 : 420;
+    return (
+      <div
+        style={{
+          flex: compact ? 'none' : 1,
+          width: compact ? '100%' : '32%',
+          minWidth: compact ? '100%' : 280,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          maxHeight: compact ? 'none' : '72vh',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Typography.Text strong>{t('任务列表')}</Typography.Text>
+          <Button size='small' onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
+            {t('刷新')}
+          </Button>
+        </div>
+        <Table
+          size='small'
+          loading={batchJobsLoading}
+          columns={jobColumns}
+          dataSource={batchJobs.map((job) => ({ ...job, key: job.id }))}
+          pagination={false}
+          rowKey='id'
+          onRow={(record) => ({
+            onClick: () => {
+              fetchBatchJobDetail(record.id, { silent: false });
+              if (compact) {
+                setBatchJobPanelTab('detail');
+              }
+            },
+            style: { cursor: 'pointer' },
+          })}
+          scroll={{
+            y: scrollY,
+            x: 'max-content',
+          }}
+          style={{ width: '100%' }}
+        />
+      </div>
+    );
+  };
+
+  const renderBatchJobDetailPanel = (compact = false) => (
+    <div
+      style={{
+        flex: compact ? 'none' : 2,
+        width: '100%',
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: compact ? 12 : 16,
+        maxHeight: compact ? 'none' : '72vh',
+        overflowY: compact ? 'visible' : 'hidden',
+      }}
+    >
+      {activeBatchJob ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography.Title heading={6} style={{ margin: 0 }}>
+              {t('任务 #{{id}}', { id: activeBatchJob.id })}
+            </Typography.Title>
+            <Space wrap>
+              <Button size='small' onClick={() => fetchBatchJobDetail(activeBatchJob.id)} loading={batchJobDetailLoading}>
+                {t('刷新')}
+              </Button>
+              <Button size='small' onClick={() => handleExportBatchJob(activeBatchJob.id)}>
+                {t('导出报告')}
+              </Button>
+            </Space>
+          </div>
+          <Space size='small' wrap>
+            <Typography.Text>{t('状态')}:</Typography.Text>
+            {renderJobStatusTag(activeBatchJob.status)}
+          </Space>
+          <div>
+            <Typography.Text>
+              {t('通道数')}:{' '}
+              <Typography.Text strong>{activeBatchJob.total_channels || 0}</Typography.Text>
+            </Typography.Text>
+            <Typography.Text style={{ marginLeft: 16 }}>
+              {t('模型数')}:{' '}
+              <Typography.Text strong>{activeBatchJob.total_models || 0}</Typography.Text>
+            </Typography.Text>
+          </div>
+          <div>
+            <Typography.Text>
+              {t('进度')}:{' '}
+              <Typography.Text strong>
+                {`${activeBatchJob.completed_count || 0}/${activeBatchJob.total_models || 0}`}
+              </Typography.Text>
+            </Typography.Text>
+            <div
+              style={{
+                height: 6,
+                backgroundColor: 'var(--semi-color-fill-1)',
+                borderRadius: 3,
+                overflow: 'hidden',
+                marginTop: 8,
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width:
+                    activeBatchJob.total_models > 0
+                      ? `${Math.min(
+                          100,
+                          ((activeBatchJob.completed_count || 0) /
+                            activeBatchJob.total_models) *
+                            100,
+                        ).toFixed(2)}%`
+                      : '0%',
+                  backgroundColor: 'var(--semi-color-primary)',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+          </div>
+
+          {batchJobDetail?.options && (
+            <div>
+              <Typography.Text strong>{t('任务配置')}</Typography.Text>
+              <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+                <div>
+                  {t('模型范围')}: {batchJobDetail.options.model_scope === 'default' ? t('仅默认测试模型') : t('全部模型')}
+                </div>
+                <div>
+                  {t('测试模式')}: {batchJobDetail.options.test_mode === 'selected' ? t('指定模型测试') : t('全部模型批量测试')}
+                </div>
+                {batchJobDetail.options.test_mode === 'selected' && Array.isArray(batchJobDetail.options.target_models) && (
+                  <div>
+                    {t('指定模型')}: {' '}
+                    {batchJobDetail.options.target_models.length > 0
+                      ? batchJobDetail.options.target_models.join(', ')
+                      : t('无')}
+                  </div>
+                )}
+                <div>
+                  {t('包含禁用渠道')}: {batchJobDetail.options.include_disabled ? t('是') : t('否')}
+                </div>
+                <div>
+                  {t('使用渠道默认模型')}:{' '}
+                  {batchJobDetail.options.use_channel_default ? t('是') : t('否')}
+                </div>
+                {Array.isArray(batchJobDetail.options.channel_ids) && batchJobDetail.options.channel_ids.length > 0 && (
+                  <div>
+                    {t('渠道ID')}:{' '}
+                    {batchJobDetail.options.channel_ids.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 16,
+            flexWrap: 'wrap',
+          }}>
+            <Button
+              size='small'
+              type={showFailedPreview ? 'primary' : 'warning'}
+              onClick={toggleFailedPreview}
+              disabled={!showFailedPreview && (batchJobResults.length === 0 || failedResultCount === 0)}
+            >
+              {showFailedPreview
+                ? t('退出失败预览')
+                : `${t('预览失败模型')} (${failedResultCount})`}
+            </Button>
+            <Button
+              type='danger'
+              size='small'
+              loading={deletingFailedModels}
+              disabled={
+                activeBatchJob.status === 'RUNNING' ||
+                activeBatchJob.status === 'PENDING' ||
+                failedResultCount === 0
+              }
+              onClick={() => handleBatchJobDeleteFailedModels(activeBatchJob.id)}
+            >
+              {t('删除失败模型')}
+            </Button>
+            {showFailedPreview && (
+              <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
+                {t('仅展示失败记录，可直接点击列表中的重试按钮进行单条处理。')}
+              </Typography.Text>
+            )}
+          </div>
+
+          {Array.isArray(batchJobDetail?.deleteSummary) && batchJobDetail.deleteSummary.length > 0 && (
+            <div
+              style={{
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 6,
+                padding: 12,
+                marginBottom: 16,
+                maxHeight: 180,
+                overflowY: 'auto',
+              }}
+            >
+              <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                {t('失败模型摘要（最新一次操作）')}
+              </Typography.Text>
+              {batchJobDetail.deleteSummary.map((item, idx) => (
+                <Typography.Text key={idx} style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>
+                  #{item.channel_id} {item.channel_name || ''} — {Array.isArray(item.removed) ? item.removed.join(', ') : '-'}
+                  {item.error ? ` (${item.error})` : ''}
+                </Typography.Text>
+              ))}
+            </div>
+          )}
+
+          <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+            {t('测试结果')}
+          </Typography.Text>
+          <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex', overflow: 'hidden' }}>
+            <Table
+              size='small'
+              loading={batchJobResultsLoading || batchJobDetailLoading}
+              columns={jobResultColumns}
+              dataSource={displayedBatchJobResults}
+              pagination={
+                showFailedPreview
+                  ? false
+                  : {
+                      currentPage: batchJobResultsPage,
+                      pageSize: batchJobResultsPageSize,
+                      total: batchJobResultsTotal,
+                      onPageChange: handleBatchJobResultPageChange,
+                      showSizeChanger: false,
+                    }
+              }
+              scroll={{
+                x: 'max-content',
+                y: compact ? 360 : 420,
+              }}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 200,
+            color: 'var(--semi-color-text-2)',
+          }}
+        >
+          {t('请选择左侧任务以查看详情')}
+        </div>
+      )}
+    </div>
+  );
 
   const copySelectedChannel = async (record) => {
     const channelToCopy = record;
@@ -2044,6 +2360,17 @@ const ChannelsTable = () => {
     }
     fetchBatchJobs(true).then();
   }, [showBatchJobPanel]);
+
+  useEffect(() => {
+    if (!showBatchJobPanel) {
+      return;
+    }
+    if (!isCompactScreen) {
+      setBatchJobPanelTab('list');
+      return;
+    }
+    setBatchJobPanelTab(activeBatchJob ? 'detail' : 'list');
+  }, [isCompactScreen, activeBatchJob, showBatchJobPanel]);
 
   useEffect(() => {
     if (!showBatchTestConfig) {
@@ -3504,32 +3831,259 @@ const ChannelsTable = () => {
               background: 'var(--semi-color-fill-0)',
             }}
           >
-            <Typography.Text strong>{t('测试范围')}</Typography.Text>
+            <Typography.Text strong>{t('配置模式')}</Typography.Text>
             <RadioGroup
-              value={batchTestConfigState.channelScope}
+              type='button'
+              value={batchTestConfigMode}
               onChange={(val) => {
                 const value =
                   typeof val === 'string'
                     ? val
-                    : val?.target?.value || val?.value || 'allEnabled';
-                setBatchTestConfigState((prev) => ({
-                  ...prev,
-                  channelScope: value,
-                }));
+                    : val?.target?.value || val?.value || 'quick';
+                setBatchTestConfigMode(value);
               }}
-              style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
+              style={{
+                marginTop: 12,
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
             >
-              <Radio value='selected' disabled={selectedChannels.length === 0}>
-                {t('仅测试所选渠道（已选 {{count}} 个）', {
-                  count: selectedChannels.length,
-                })}
+              <Radio value='quick' style={{ flex: 1, minWidth: 140 }}>
+                {t('快速模式')}
               </Radio>
-              <Radio value='allEnabled'>{t('测试全部渠道')}</Radio>
-              <Radio value='allWithDisabled'>
-                {t('测试全部渠道')}（{t('包含已禁用渠道')}）
+              <Radio value='advanced' style={{ flex: 1, minWidth: 140 }}>
+                {t('自定义模式')}
               </Radio>
             </RadioGroup>
+            <Typography.Text type='tertiary' style={{ marginTop: 12, display: 'block' }}>
+              {isQuickBatchConfig
+                ? t('快速模式仅展示核心参数，适合日常巡检。切换到自定义模式可获得全部高级选项。')
+                : t('自定义模式可灵活配置模型过滤、并发节奏等细节。')}
+            </Typography.Text>
           </div>
+
+          {isQuickBatchConfig && (
+            <>
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('测试范围')}</Typography.Text>
+                <RadioGroup
+                  value={quickScopeValue}
+                  onChange={(val) => {
+                    const value =
+                      typeof val === 'string'
+                        ? val
+                        : val?.target?.value || val?.value || 'all';
+                    setBatchTestConfigState((prev) => {
+                      const includeDisabled = prev.channelScope === 'allWithDisabled';
+                      if (value === 'selected') {
+                        return {
+                          ...prev,
+                          channelScope: 'selected',
+                        };
+                      }
+                      return {
+                        ...prev,
+                        channelScope: includeDisabled ? 'allWithDisabled' : 'allEnabled',
+                      };
+                    });
+                  }}
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <Radio value='selected' disabled={selectedChannels.length === 0}>
+                    {t('仅测试所选渠道（已选 {{count}} 个）', {
+                      count: selectedChannels.length,
+                    })}
+                  </Radio>
+                  <Radio value='all'>{t('测试全部渠道')}</Radio>
+                </RadioGroup>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Typography.Text type='tertiary'>
+                    {t('包含已禁用渠道')}
+                  </Typography.Text>
+                  <Switch
+                    size='small'
+                    checked={quickIncludeDisabled}
+                    disabled={quickScopeValue === 'selected'}
+                    onChange={(checked) => {
+                      setBatchTestConfigState((prev) => {
+                        if (prev.channelScope === 'selected') {
+                          return prev;
+                        }
+                        return {
+                          ...prev,
+                          channelScope: checked ? 'allWithDisabled' : 'allEnabled',
+                        };
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('执行节奏')}</Typography.Text>
+                <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+                  {t('并发度与请求间隔影响整体耗时与上游限流压力。')}
+                </Typography.Text>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: isMobile() ? 'column' : 'row',
+                    gap: 12,
+                    alignItems: isMobile() ? 'stretch' : 'center',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: isMobile() ? '100%' : 220 }}>
+                    <Slider
+                      min={1}
+                      max={10}
+                      step={1}
+                      value={batchTestConfigState.concurrency}
+                      onChange={(value) => {
+                        const raw = Array.isArray(value) ? value[0] : value;
+                        const num = Math.max(1, Math.min(10, Number(raw) || 1));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          concurrency: num,
+                        }));
+                      }}
+                    />
+                  </div>
+                  <InputNumber
+                    min={1}
+                    max={10}
+                    value={batchTestConfigState.concurrency}
+                    onChange={(value) => {
+                      const num = Math.max(1, Math.min(10, Number(value) || 1));
+                      setBatchTestConfigState((prev) => ({
+                        ...prev,
+                        concurrency: num,
+                      }));
+                    }}
+                    style={{ width: isMobile() ? '100%' : 100 }}
+                    size='large'
+                  />
+                </div>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: isMobile() ? 'column' : 'row',
+                    gap: 12,
+                    alignItems: isMobile() ? 'stretch' : 'center',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <Typography.Text type='tertiary'>
+                      {t('请求间隔 (ms)')}
+                    </Typography.Text>
+                    <InputNumber
+                      min={100}
+                      max={5000}
+                      step={50}
+                      value={batchTestConfigState.intervalMs}
+                      onChange={(value) => {
+                        const num = Math.max(100, Math.min(5000, Number(value) || 100));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          intervalMs: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                      size='large'
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <Typography.Text type='tertiary'>
+                      {t('最大重试次数')}
+                    </Typography.Text>
+                    <InputNumber
+                      min={0}
+                      max={5}
+                      value={batchTestConfigState.retryLimit}
+                      onChange={(value) => {
+                        const num = Math.max(0, Math.min(5, Number(value) || 0));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          retryLimit: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                      size='large'
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Typography.Text type='tertiary' style={{ display: 'block' }}>
+                {t('快速模式默认使用渠道配置的模型列表与默认模型，适合快速巡检任务。')}
+              </Typography.Text>
+            </>
+          )}
+
+          {!isQuickBatchConfig && (
+            <>
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('测试范围')}</Typography.Text>
+                <RadioGroup
+                  value={batchTestConfigState.channelScope}
+                  onChange={(val) => {
+                    const value =
+                      typeof val === 'string'
+                        ? val
+                        : val?.target?.value || val?.value || 'allEnabled';
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      channelScope: value,
+                    }));
+                  }}
+                  style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
+                >
+                  <Radio value='selected' disabled={selectedChannels.length === 0}>
+                    {t('仅测试所选渠道（已选 {{count}} 个）', {
+                      count: selectedChannels.length,
+                    })}
+                  </Radio>
+                  <Radio value='allEnabled'>{t('测试全部渠道')}</Radio>
+                  <Radio value='allWithDisabled'>
+                    {t('测试全部渠道')}（{t('包含已禁用渠道')}）
+                  </Radio>
+                </RadioGroup>
+              </div>
 
           <div
             style={{
@@ -3951,279 +4505,33 @@ const ChannelsTable = () => {
         style={{ width: isCompactScreen ? '96%' : '92vw', maxWidth: 1120 }}
         bodyStyle={{ padding: isCompactScreen ? '16px 12px' : '24px', maxHeight: '78vh', overflowY: 'auto' }}
       >
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: isCompactScreen ? 'column' : 'row',
-            gap: isCompactScreen ? 12 : 20,
-            alignItems: 'stretch',
-          }}
-        >
+        {isCompactScreen ? (
+          <Tabs
+            type='line'
+            activeKey={batchJobPanelTab}
+            onChange={(key) => setBatchJobPanelTab(key)}
+            tabBarStyle={{ marginBottom: 12 }}
+          >
+            <Tabs.TabPane tab={t('任务列表')} itemKey='list'>
+              {renderBatchJobListPanel(true)}
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('任务详情')} itemKey='detail' disabled={!activeBatchJob}>
+              {renderBatchJobDetailPanel(true)}
+            </Tabs.TabPane>
+          </Tabs>
+        ) : (
           <div
             style={{
-              flex: isCompactScreen ? 'none' : 1,
-              width: isCompactScreen ? '100%' : '32%',
-              marginBottom: isCompactScreen ? 12 : 0,
-              minWidth: isCompactScreen ? '100%' : 280,
               display: 'flex',
-              flexDirection: 'column',
-              maxHeight: isCompactScreen ? 'auto' : '72vh',
+              flexDirection: 'row',
+              gap: 20,
+              alignItems: 'stretch',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 12,
-              }}
-            >
-              <Typography.Text strong>{t('任务列表')}</Typography.Text>
-              <Button size='small' onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
-                {t('刷新')}
-              </Button>
-            </div>
-            <Table
-              size='small'
-              loading={batchJobsLoading}
-              columns={jobColumns}
-              dataSource={batchJobs.map((job) => ({ ...job, key: job.id }))}
-              pagination={false}
-              rowKey='id'
-              onRow={(record) => ({
-                onClick: () => fetchBatchJobDetail(record.id, { silent: false }),
-                style: { cursor: 'pointer' },
-              })}
-              scroll={{
-                y: isCompactScreen ? 220 : 420,
-                x: 'max-content',
-              }}
-              style={{ width: '100%' }}
-            />
+            {renderBatchJobListPanel(false)}
+            {renderBatchJobDetailPanel(false)}
           </div>
-
-          <div
-            style={{
-              flex: isCompactScreen ? 'none' : 2,
-              width: isCompactScreen ? '100%' : '68%',
-              minWidth: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: isCompactScreen ? 12 : 16,
-              maxHeight: isCompactScreen ? 'none' : '72vh',
-              overflowY: isCompactScreen ? 'visible' : 'hidden',
-            }}
-          >
-            {activeBatchJob ? (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 16,
-                  minWidth: 0,
-                  overflow: 'hidden',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Typography.Title heading={6} style={{ margin: 0 }}>
-                    {t('任务 #{{id}}', { id: activeBatchJob.id })}
-                  </Typography.Title>
-                  <Space wrap>
-                    <Button size='small' onClick={() => fetchBatchJobDetail(activeBatchJob.id)} loading={batchJobDetailLoading}>
-                      {t('刷新')}
-                    </Button>
-                    <Button size='small' onClick={() => handleExportBatchJob(activeBatchJob.id)}>
-                      {t('导出报告')}
-                    </Button>
-                  </Space>
-                </div>
-                <Space size='small' wrap>
-                  <Typography.Text>{t('状态')}:</Typography.Text>
-                  {renderJobStatusTag(activeBatchJob.status)}
-                </Space>
-                <div>
-                  <Typography.Text>
-                    {t('通道数')}:{' '}
-                    <Typography.Text strong>{activeBatchJob.total_channels || 0}</Typography.Text>
-                  </Typography.Text>
-                  <Typography.Text style={{ marginLeft: 16 }}>
-                    {t('模型数')}:{' '}
-                    <Typography.Text strong>{activeBatchJob.total_models || 0}</Typography.Text>
-                  </Typography.Text>
-                </div>
-                <div>
-                  <Typography.Text>
-                    {t('进度')}:{' '}
-                    <Typography.Text strong>
-                      {`${activeBatchJob.completed_count || 0}/${activeBatchJob.total_models || 0}`}
-                    </Typography.Text>
-                  </Typography.Text>
-                  <div
-                    style={{
-                      height: 6,
-                      backgroundColor: 'var(--semi-color-fill-1)',
-                      borderRadius: 3,
-                      overflow: 'hidden',
-                      marginTop: 8,
-                    }}
-                  >
-                    <div
-                      style={{
-                        height: '100%',
-                        width:
-                          activeBatchJob.total_models > 0
-                            ? `${Math.min(
-                                100,
-                                ((activeBatchJob.completed_count || 0) /
-                                  activeBatchJob.total_models) *
-                                  100,
-                              ).toFixed(2)}%`
-                            : '0%',
-                        backgroundColor: 'var(--semi-color-primary)',
-                        transition: 'width 0.3s ease',
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {batchJobDetail?.options && (
-                  <div>
-                    <Typography.Text strong>{t('任务配置')}</Typography.Text>
-                    <div style={{ marginTop: 8, lineHeight: 1.6 }}>
-                      <div>
-                        {t('模型范围')}: {batchJobDetail.options.model_scope === 'default' ? t('仅默认测试模型') : t('全部模型')}
-                      </div>
-                      <div>
-                        {t('测试模式')}: {batchJobDetail.options.test_mode === 'selected' ? t('指定模型测试') : t('全部模型批量测试')}
-                      </div>
-                      {batchJobDetail.options.test_mode === 'selected' && Array.isArray(batchJobDetail.options.target_models) && (
-                        <div>
-                          {t('指定模型')}: {' '}
-                          {batchJobDetail.options.target_models.length > 0
-                            ? batchJobDetail.options.target_models.join(', ')
-                            : t('无')}
-                        </div>
-                      )}
-                      <div>
-                        {t('包含禁用渠道')}: {batchJobDetail.options.include_disabled ? t('是') : t('否')}
-                      </div>
-                      <div>
-                        {t('使用渠道默认模型')}:{' '}
-                        {batchJobDetail.options.use_channel_default ? t('是') : t('否')}
-                      </div>
-                      {Array.isArray(batchJobDetail.options.channel_ids) && batchJobDetail.options.channel_ids.length > 0 && (
-                        <div>
-                          {t('渠道ID')}:{' '}
-                          {batchJobDetail.options.channel_ids.join(', ')}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  marginBottom: 16,
-                  flexWrap: 'wrap',
-                }}>
-                  <Button
-                    size='small'
-                    type={showFailedPreview ? 'primary' : 'warning'}
-                    onClick={toggleFailedPreview}
-                    disabled={!showFailedPreview && (batchJobResults.length === 0 || failedResultCount === 0)}
-                  >
-                    {showFailedPreview
-                      ? t('退出失败预览')
-                      : `${t('预览失败模型')} (${failedResultCount})`}
-                  </Button>
-                  <Button
-                    type='danger'
-                    size='small'
-                    loading={deletingFailedModels}
-                    disabled={
-                      activeBatchJob.status === 'RUNNING' ||
-                      activeBatchJob.status === 'PENDING' ||
-                      failedResultCount === 0
-                    }
-                    onClick={() => handleBatchJobDeleteFailedModels(activeBatchJob.id)}
-                  >
-                    {t('删除失败模型')}
-                  </Button>
-                  {showFailedPreview && (
-                    <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
-                      {t('仅展示失败记录，可直接点击列表中的重试按钮进行单条处理。')}
-                    </Typography.Text>
-                  )}
-                </div>
-
-                {Array.isArray(batchJobDetail?.deleteSummary) && batchJobDetail.deleteSummary.length > 0 && (
-                  <div
-                    style={{
-                      border: '1px solid var(--semi-color-border)',
-                      borderRadius: 6,
-                      padding: 12,
-                      marginBottom: 16,
-                      maxHeight: 180,
-                      overflowY: 'auto',
-                    }}
-                  >
-                    <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-                      {t('失败模型摘要（最新一次操作）')}
-                    </Typography.Text>
-                    {batchJobDetail.deleteSummary.map((item, idx) => (
-                      <Typography.Text key={idx} style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>
-                        #{item.channel_id} {item.channel_name || ''} — {Array.isArray(item.removed) ? item.removed.join(', ') : '-'}
-                        {item.error ? ` (${item.error})` : ''}
-                      </Typography.Text>
-                    ))}
-                  </div>
-                )}
-
-                <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
-                  {t('测试结果')}
-                </Typography.Text>
-                <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex', overflow: 'hidden' }}>
-                  <Table
-                    size='small'
-                    loading={batchJobResultsLoading || batchJobDetailLoading}
-                    columns={jobResultColumns}
-                    dataSource={displayedBatchJobResults}
-                    pagination={
-                      showFailedPreview
-                        ? false
-                        : {
-                            currentPage: batchJobResultsPage,
-                            pageSize: batchJobResultsPageSize,
-                            total: batchJobResultsTotal,
-                            onPageChange: handleBatchJobResultPageChange,
-                            showSizeChanger: false,
-                          }
-                    }
-                    scroll={{
-                      x: 'max-content',
-                      y: isCompactScreen ? 260 : 420,
-                    }}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minHeight: 200,
-                  color: 'var(--semi-color-text-2)',
-                }}
-              >
-                {t('请选择左侧任务以查看详情')}
-              </div>
-            )}
-          </div>
-        </div>
+        )}
       </Modal>
 
       <Modal

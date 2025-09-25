@@ -320,7 +320,7 @@ func ExportChannelBatchTestJob(c *gin.Context) {
     writer := csv.NewWriter(c.Writer)
     defer writer.Flush()
 
-    header := []string{"JobID", "ChannelID", "ChannelName", "Model", "Success", "Duration(ms)", "RetryCount", "ErrorMessage", "CreatedAt"}
+    header := []string{"JobID", "ChannelID", "ChannelName", "Model", "Success", "ResultStatus", "Duration(ms)", "RetryCount", "ErrorMessage", "CreatedAt"}
     _ = writer.Write(header)
 
     batchSize := 500
@@ -342,6 +342,7 @@ func ExportChannelBatchTestJob(c *gin.Context) {
                 item.ChannelName,
                 item.ModelName,
                 strconv.FormatBool(item.Success),
+                item.ResultStatus,
                 strconv.Itoa(item.DurationMillis),
                 strconv.Itoa(item.RetryCount),
                 item.ErrorMessage,
@@ -429,6 +430,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
 
     if execErr != nil {
         updates["success"] = false
+        updates["result_status"] = model.ChannelTestResultStatusFailed
         if openAIError != nil && openAIError.Error.Message != "" {
             updates["error_message"] = fmt.Sprintf("%s (code %v)", openAIError.Error.Message, openAIError.Error.Code)
             responseMessage = fmt.Sprintf("模型重试失败：%s", openAIError.Error.Message)
@@ -438,6 +440,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
         }
     } else {
         updates["success"] = true
+        updates["result_status"] = model.ChannelTestResultStatusSuccess
         updates["error_message"] = ""
     }
 
@@ -525,6 +528,8 @@ func DeleteFailedModelsByJob(c *gin.Context) {
         })
         return
     }
+
+    markResultIDs := make([]int64, 0, len(failedResults))
 
     if len(failedResults) == 0 {
         c.JSON(http.StatusOK, gin.H{
@@ -620,6 +625,9 @@ func DeleteFailedModelsByJob(c *gin.Context) {
                 continue
             }
             deletedCount += len(removed)
+            for _, record := range records {
+                markResultIDs = append(markResultIDs, record.ID)
+            }
         }
 
         summary = append(summary, gin.H{
@@ -628,6 +636,23 @@ func DeleteFailedModelsByJob(c *gin.Context) {
             "removed": removed,
             "remaining": len(kept),
         })
+    }
+
+    if !req.DryRun && len(markResultIDs) > 0 {
+        if err := model.MarkChannelTestResultsDeleted(markResultIDs); err != nil {
+            c.JSON(http.StatusOK, gin.H{
+                "success": false,
+                "message": fmt.Sprintf("标记测试结果状态失败: %v", err),
+            })
+            return
+        }
+        if err := model.RefreshChannelTestJobStats(jobID); err != nil {
+            c.JSON(http.StatusOK, gin.H{
+                "success": false,
+                "message": fmt.Sprintf("刷新任务统计失败: %v", err),
+            })
+            return
+        }
     }
 
     message := "操作完成"

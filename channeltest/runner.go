@@ -324,6 +324,7 @@ func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model
                 ChannelName:    task.channel.Name,
                 ModelName:      task.model,
                 Success:        true,
+                ResultStatus:   model.ChannelTestResultStatusSuccess,
                 DurationMillis: int(math.Round(consumed * 1000)),
                 RetryCount:     attempt,
             }
@@ -353,6 +354,7 @@ func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model
         ChannelName:    task.channel.Name,
         ModelName:      task.model,
         Success:        false,
+        ResultStatus:   model.ChannelTestResultStatusFailed,
         DurationMillis: int(math.Round(consumed * 1000)),
         RetryCount:     retryLimit,
         ErrorMessage:   message,
