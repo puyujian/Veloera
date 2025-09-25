@@ -1996,7 +1996,8 @@ const ChannelsTable = () => {
   ];
 
   const renderBatchJobListPanel = (compact = false) => {
-    const scrollY = compact ? 320 : 420;
+    // 小屏下不在表格内再套一层纵向滚动，避免与弹窗 Body 嵌套滚动造成遮挡
+    const tableScroll = compact ? { x: 'max-content' } : { x: 'max-content', y: 420 };
     return (
       <div
         style={{
@@ -2006,6 +2007,7 @@ const ChannelsTable = () => {
           display: 'flex',
           flexDirection: 'column',
           gap: 12,
+          // 小屏交由外层 Modal 滚动；大屏保持面板自身的弹性高度
           maxHeight: compact ? 'none' : '72vh',
         }}
       >
@@ -2037,10 +2039,7 @@ const ChannelsTable = () => {
             },
             style: { cursor: 'pointer' },
           })}
-          scroll={{
-            y: scrollY,
-            x: 'max-content',
-          }}
+          scroll={tableScroll}
           style={{ width: '100%' }}
         />
       </div>
@@ -2056,6 +2055,7 @@ const ChannelsTable = () => {
         display: 'flex',
         flexDirection: 'column',
         gap: compact ? 12 : 16,
+        // 小屏交由外层 Modal 滚动；大屏保持局部布局
         maxHeight: compact ? 'none' : '72vh',
         overflowY: compact ? 'visible' : 'hidden',
       }}
@@ -2230,7 +2230,7 @@ const ChannelsTable = () => {
           <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
             {t('测试结果')}
           </Typography.Text>
-          <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex', overflow: 'hidden' }}>
+          <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex', overflow: compact ? 'visible' : 'hidden' }}>
             <Table
               size='small'
               loading={batchJobResultsLoading || batchJobDetailLoading}
@@ -2247,10 +2247,8 @@ const ChannelsTable = () => {
                       showSizeChanger: false,
                     }
               }
-              scroll={{
-                x: 'max-content',
-                y: compact ? 360 : 420,
-              }}
+              // 小屏下不设置表格内部纵向滚动，避免与外层 Modal 重叠滚动
+              scroll={compact ? { x: 'max-content' } : { x: 'max-content', y: 420 }}
               style={{ width: '100%' }}
             />
           </div>
@@ -4481,6 +4479,7 @@ const ChannelsTable = () => {
         visible={showBatchJobPanel}
         centered={true}
         maskClosable={false}
+        destroyOnClose
         onCancel={() => {
           setShowBatchJobPanel(false);
           setActiveBatchJob(null);
@@ -4506,7 +4505,7 @@ const ChannelsTable = () => {
           </div>
         }
         style={{ width: isCompactScreen ? '96%' : '92vw', maxWidth: 1120 }}
-        bodyStyle={{ padding: isCompactScreen ? '16px 12px' : '24px', maxHeight: '78vh', overflowY: 'auto' }}
+        bodyStyle={{ padding: isCompactScreen ? '16px 12px' : '24px', maxHeight: '78vh', overflowY: 'auto', paddingBottom: 12 }}
       >
         {isCompactScreen ? (
           <Tabs
@@ -4529,6 +4528,7 @@ const ChannelsTable = () => {
               flexDirection: 'row',
               gap: 20,
               alignItems: 'stretch',
+              minWidth: 0,
             }}
           >
             {renderBatchJobListPanel(false)}
@@ -4708,7 +4708,7 @@ const ChannelsTable = () => {
         footer={null}
         maskClosable={true}
         centered={true}
-        width={800}
+        width={isCompactScreen ? '92%' : 800}
       >
         <div style={{ 
           maxHeight: '70vh', 
