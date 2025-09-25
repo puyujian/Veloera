@@ -1135,9 +1135,7 @@ const ChannelsTable = () => {
   const [batchTestAbortController, setBatchTestAbortController] = useState(null);
 
   const createInitialBatchTestConfig = () => ({
-    useSelectedChannels: true,
-    includeAll: false,
-    includeDisabled: false,
+    channelScope: 'allEnabled',
     modelScope: 'all',
     modelWhitelist: '',
     modelBlacklist: '',
@@ -1153,6 +1151,7 @@ const ChannelsTable = () => {
   const [batchTestConfigState, setBatchTestConfigState] = useState(
     createInitialBatchTestConfig,
   );
+  const [showAdvancedBatchConfig, setShowAdvancedBatchConfig] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [availableModelsLoading, setAvailableModelsLoading] = useState(false);
   const [modelSelectorKeyword, setModelSelectorKeyword] = useState('');
@@ -1335,11 +1334,20 @@ const ChannelsTable = () => {
   };
 
   const openBatchTestConfigModal = () => {
-    setBatchTestConfigState((prev) => ({
-      ...prev,
-      useSelectedChannels: selectedChannels.length > 0,
-      includeAll: selectedChannels.length === 0 ? true : prev.includeAll,
-    }));
+    setBatchTestConfigState((prev) => {
+      const hasSelected = selectedChannels.length > 0;
+      let nextScope = prev.channelScope;
+      if (hasSelected) {
+        nextScope = prev.channelScope === 'allWithDisabled' ? 'allWithDisabled' : 'selected';
+      } else if (prev.channelScope === 'selected') {
+        nextScope = 'allEnabled';
+      }
+      return {
+        ...prev,
+        channelScope: nextScope,
+      };
+    });
+    setShowAdvancedBatchConfig(false);
     setShowBatchTestConfig(true);
   };
 
@@ -1352,6 +1360,7 @@ const ChannelsTable = () => {
     setBatchTestConfigState(createInitialBatchTestConfig());
     setModelSelectorKeyword('');
     setShowFailedPreview(false);
+    setShowAdvancedBatchConfig(false);
   };
 
   const fetchAvailableModels = async () => {
@@ -1464,15 +1473,16 @@ const ChannelsTable = () => {
       return;
     }
     const config = batchTestConfigState;
+    const scope = config.channelScope;
     let channelIds = [];
-    if (config.useSelectedChannels && selectedChannels.length > 0) {
+    if (scope === 'selected' && selectedChannels.length > 0) {
       channelIds = selectedChannels
         .map((item) => item.id)
         .filter((id) => typeof id === 'number' && id > 0);
     }
 
-    if (!config.includeAll && channelIds.length === 0) {
-      showWarning(t('请至少选择一个渠道或勾选全量测试'));
+    if (scope === 'selected' && channelIds.length === 0) {
+      showWarning(t('请至少选择一个渠道或切换到全量测试'));
       return;
     }
 
@@ -1487,8 +1497,8 @@ const ChannelsTable = () => {
 
     const payload = {
       channel_ids: channelIds,
-      include_all: config.includeAll,
-      include_disabled: config.includeDisabled,
+      include_all: scope !== 'selected',
+      include_disabled: scope === 'allWithDisabled',
       model_scope: config.modelScope,
       model_whitelist: whitelist,
       model_blacklist: blacklist,
@@ -3501,6 +3511,11 @@ const ChannelsTable = () => {
           </div>
         }
         style={{ width: isMobile() ? '92%' : 720 }}
+        bodyStyle={{
+          padding: isMobile() ? '16px 12px' : '24px',
+          maxHeight: isMobile() ? '78vh' : '70vh',
+          overflowY: 'auto',
+        }}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, width: '100%' }}>
           <div
@@ -3512,54 +3527,30 @@ const ChannelsTable = () => {
             }}
           >
             <Typography.Text strong>{t('测试范围')}</Typography.Text>
-            <Space direction='vertical' style={{ marginTop: 12, width: '100%' }}>
-              <Checkbox
-                style={{ display: 'block' }}
-                checked={batchTestConfigState.useSelectedChannels}
-                disabled={selectedChannels.length === 0}
-                onChange={(e) => {
-                  const checked = !!e?.target?.checked;
-                  setBatchTestConfigState((prev) => ({
-                    ...prev,
-                    useSelectedChannels: checked,
-                    includeAll:
-                      checked && selectedChannels.length > 0
-                        ? prev.includeAll
-                        : true,
-                  }));
-                }}
-              >
+            <RadioGroup
+              value={batchTestConfigState.channelScope}
+              onChange={(val) => {
+                const value =
+                  typeof val === 'string'
+                    ? val
+                    : val?.target?.value || val?.value || 'allEnabled';
+                setBatchTestConfigState((prev) => ({
+                  ...prev,
+                  channelScope: value,
+                }));
+              }}
+              style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              <Radio value='selected' disabled={selectedChannels.length === 0}>
                 {t('仅测试所选渠道（已选 {{count}} 个）', {
                   count: selectedChannels.length,
                 })}
-              </Checkbox>
-              <Checkbox
-                style={{ display: 'block' }}
-                checked={batchTestConfigState.includeAll}
-                onChange={(e) => {
-                  const checked = !!e?.target?.checked;
-                  setBatchTestConfigState((prev) => ({
-                    ...prev,
-                    includeAll: checked,
-                  }));
-                }}
-              >
-                {t('测试全部渠道')}
-              </Checkbox>
-              <Checkbox
-                style={{ display: 'block' }}
-                checked={batchTestConfigState.includeDisabled}
-                onChange={(e) => {
-                  const checked = !!e?.target?.checked;
-                  setBatchTestConfigState((prev) => ({
-                    ...prev,
-                    includeDisabled: checked,
-                  }));
-                }}
-              >
-                {t('包含已禁用渠道')}
-              </Checkbox>
-            </Space>
+              </Radio>
+              <Radio value='allEnabled'>{t('测试全部渠道')}</Radio>
+              <Radio value='allWithDisabled'>
+                {t('测试全部渠道')}（{t('包含已禁用渠道')}）
+              </Radio>
+            </RadioGroup>
           </div>
 
           <div
@@ -3717,53 +3708,157 @@ const ChannelsTable = () => {
             </div>
           )}
 
-          {batchTestConfigState.testMode === 'all' && (
+          <div
+            style={{
+              padding: '12px 18px',
+              border: '1px dashed var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: isMobile() ? 'flex-start' : 'center',
+              gap: 12,
+              flexWrap: isMobile() ? 'wrap' : 'nowrap',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Typography.Text strong>{t('高级设置')}</Typography.Text>
+              <Typography.Text type='tertiary'>
+                {t('调整模型过滤、并发等高级参数。')}
+              </Typography.Text>
+            </div>
+            <Button
+              size='small'
+              theme='light'
+              type='tertiary'
+              icon={
+                <IconTreeTriangleDown
+                  style={{
+                    transition: 'transform 0.2s ease',
+                    transform: showAdvancedBatchConfig ? 'rotate(180deg)' : 'rotate(-90deg)',
+                  }}
+                />
+              }
+              onClick={() => setShowAdvancedBatchConfig((prev) => !prev)}
+              style={{ alignSelf: isMobile() ? 'flex-start' : 'center' }}
+            >
+              {showAdvancedBatchConfig ? t('收起') : t('展开')}
+            </Button>
+          </div>
+
+          {showAdvancedBatchConfig && (
             <>
-              <div
-                style={{
-                  padding: '14px 18px',
-                  border: '1px solid var(--semi-color-border)',
-                  borderRadius: 8,
-                  background: 'var(--semi-color-fill-0)',
-                }}
-              >
-                <Typography.Text strong>{t('模型范围')}</Typography.Text>
-                <RadioGroup
-                  type='button'
-                  value={batchTestConfigState.modelScope}
-                  onChange={(val) => {
-                    const value =
-                      typeof val === 'string'
-                        ? val
-                        : val?.target?.value || val?.value || 'all';
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      modelScope: value,
-                    }));
-                  }}
-                  style={{ marginTop: 12, display: 'flex', gap: 8 }}
-                >
-                  <Radio value='all' style={{ flex: 1 }}>
-                    {t('全部模型')}
-                  </Radio>
-                  <Radio value='default' style={{ flex: 1 }}>
-                    {t('仅默认测试模型')}
-                  </Radio>
-                </RadioGroup>
-                <Checkbox
-                  style={{ marginTop: 12, display: 'block' }}
-                  checked={batchTestConfigState.useChannelDefault}
-                  onChange={(e) => {
-                    const checked = !!e?.target?.checked;
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      useChannelDefault: checked,
-                    }));
-                  }}
-                >
-                  {t('优先使用渠道自定义默认模型')}
-                </Checkbox>
-              </div>
+              {batchTestConfigState.testMode === 'all' && (
+                <>
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 8,
+                      background: 'var(--semi-color-fill-0)',
+                    }}
+                  >
+                    <Typography.Text strong>{t('模型范围')}</Typography.Text>
+                    <RadioGroup
+                      type='button'
+                      value={batchTestConfigState.modelScope}
+                      onChange={(val) => {
+                        const value =
+                          typeof val === 'string'
+                            ? val
+                            : val?.target?.value || val?.value || 'all';
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          modelScope: value,
+                        }));
+                      }}
+                      style={{ marginTop: 12, display: 'flex', gap: 8 }}
+                    >
+                      <Radio value='all' style={{ flex: 1 }}>
+                        {t('全部模型')}
+                      </Radio>
+                      <Radio value='default' style={{ flex: 1 }}>
+                        {t('仅默认测试模型')}
+                      </Radio>
+                    </RadioGroup>
+                    <Checkbox
+                      style={{ marginTop: 12, display: 'block' }}
+                      checked={batchTestConfigState.useChannelDefault}
+                      onChange={(e) => {
+                        const checked = !!e?.target?.checked;
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          useChannelDefault: checked,
+                        }));
+                      }}
+                    >
+                      {t('优先使用渠道自定义默认模型')}
+                    </Checkbox>
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 8,
+                      background: 'var(--semi-color-fill-0)',
+                    }}
+                  >
+                    <Typography.Text strong>{t('模型白名单')}</Typography.Text>
+                    <textarea
+                      rows={4}
+                      placeholder={t('使用逗号或换行分隔模型名称，可留空')}
+                      value={batchTestConfigState.modelWhitelist}
+                      onChange={(e) =>
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          modelWhitelist: e?.target?.value || '',
+                        }))
+                      }
+                      className='semi-input'
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: 4,
+                        border: '1px solid var(--semi-color-border)',
+                        resize: 'vertical',
+                        minHeight: 96,
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 8,
+                      background: 'var(--semi-color-fill-0)',
+                    }}
+                  >
+                    <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
+                    <textarea
+                      rows={4}
+                      placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
+                      value={batchTestConfigState.modelBlacklist}
+                      onChange={(e) =>
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          modelBlacklist: e?.target?.value || '',
+                        }))
+                      }
+                      className='semi-input'
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: 4,
+                        border: '1px solid var(--semi-color-border)',
+                        resize: 'vertical',
+                        minHeight: 96,
+                      }}
+                    />
+                  </div>
+                </>
+              )}
 
               <div
                 style={{
@@ -3773,135 +3868,73 @@ const ChannelsTable = () => {
                   background: 'var(--semi-color-fill-0)',
                 }}
               >
-                <Typography.Text strong>{t('模型白名单')}</Typography.Text>
-                <textarea
-                  rows={4}
-                  placeholder={t('使用逗号或换行分隔模型名称，可留空')}
-                  value={batchTestConfigState.modelWhitelist}
-                  onChange={(e) =>
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      modelWhitelist: e?.target?.value || '',
-                    }))
-                  }
-                  className='semi-input'
+                <Typography.Text strong>{t('并发与频率')}</Typography.Text>
+                <div
                   style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: isMobile() ? 'column' : 'row',
+                    gap: 20,
                     width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: 4,
-                    border: '1px solid var(--semi-color-border)',
-                    resize: 'vertical',
-                    minHeight: 96,
+                    flexWrap: 'wrap',
                   }}
-                />
-              </div>
-
-              <div
-                style={{
-                  padding: '14px 18px',
-                  border: '1px solid var(--semi-color-border)',
-                  borderRadius: 8,
-                  background: 'var(--semi-color-fill-0)',
-                }}
-              >
-                <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
-                <textarea
-                  rows={4}
-                  placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
-                  value={batchTestConfigState.modelBlacklist}
-                  onChange={(e) =>
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      modelBlacklist: e?.target?.value || '',
-                    }))
-                  }
-                  className='semi-input'
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: 4,
-                    border: '1px solid var(--semi-color-border)',
-                    resize: 'vertical',
-                    minHeight: 96,
-                  }}
-                />
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
+                    <Typography.Text type='tertiary'>{t('并发数')}</Typography.Text>
+                    <InputNumber
+                      min={1}
+                      max={16}
+                      value={batchTestConfigState.concurrency}
+                      onChange={(value) => {
+                        const num = Math.max(1, Math.min(16, Number(value) || 1));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          concurrency: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200, flex: isMobile() ? 'none' : '1' }}>
+                    <Typography.Text type='tertiary'>{t('请求间隔(ms)')}</Typography.Text>
+                    <InputNumber
+                      min={100}
+                      max={5000}
+                      step={50}
+                      value={batchTestConfigState.intervalMs}
+                      onChange={(value) => {
+                        const num = Math.max(100, Math.min(5000, Number(value) || 100));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          intervalMs: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 160 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
+                    <Typography.Text type='tertiary'>{t('最大重试次数')}</Typography.Text>
+                    <InputNumber
+                      min={0}
+                      max={5}
+                      value={batchTestConfigState.retryLimit}
+                      onChange={(value) => {
+                        const num = Math.max(0, Math.min(5, Number(value) || 0));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          retryLimit: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                    />
+                  </div>
+                </div>
+                <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 12 }}>
+                  {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
+                </Typography.Text>
               </div>
             </>
           )}
-
-          <div
-            style={{
-              padding: '14px 18px',
-              border: '1px solid var(--semi-color-border)',
-              borderRadius: 8,
-              background: 'var(--semi-color-fill-0)',
-            }}
-          >
-            <Typography.Text strong>{t('并发与频率')}</Typography.Text>
-            <div
-              style={{
-                marginTop: 12,
-                display: 'flex',
-                flexDirection: isMobile() ? 'column' : 'row',
-                gap: 20,
-                width: '100%',
-                flexWrap: 'wrap',
-              }}
-            >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
-                <Typography.Text type='tertiary'>{t('并发数')}</Typography.Text>
-                <InputNumber
-                  min={1}
-                  max={16}
-                  value={batchTestConfigState.concurrency}
-                  onChange={(value) => {
-                    const num = Math.max(1, Math.min(16, Number(value) || 1));
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      concurrency: num,
-                    }));
-                  }}
-                  style={{ width: 140 }}
-                />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200, flex: isMobile() ? 'none' : '1' }}>
-                <Typography.Text type='tertiary'>{t('请求间隔(ms)')}</Typography.Text>
-                <InputNumber
-                  min={100}
-                  max={5000}
-                  step={50}
-                  value={batchTestConfigState.intervalMs}
-                  onChange={(value) => {
-                    const num = Math.max(100, Math.min(5000, Number(value) || 100));
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      intervalMs: num,
-                    }));
-                  }}
-                  style={{ width: 160 }}
-                />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
-                <Typography.Text type='tertiary'>{t('最大重试次数')}</Typography.Text>
-                <InputNumber
-                  min={0}
-                  max={5}
-                  value={batchTestConfigState.retryLimit}
-                  onChange={(value) => {
-                    const num = Math.max(0, Math.min(5, Number(value) || 0));
-                    setBatchTestConfigState((prev) => ({
-                      ...prev,
-                      retryLimit: num,
-                    }));
-                  }}
-                  style={{ width: 140 }}
-                />
-              </div>
-            </div>
-            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 12 }}>
-              {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
-            </Typography.Text>
-          </div>
 
           <Typography.Text type='tertiary'>
             {t('提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。')}
