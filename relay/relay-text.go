@@ -37,7 +37,6 @@ import (
 	"veloera/relay/helper"
 	"veloera/service"
 	"veloera/setting"
-	"veloera/setting/model_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/shopspring/decimal"
@@ -240,7 +239,7 @@ func TextHelper(c *gin.Context) (openaiErr *dto.OpenAIErrorWithStatusCode) {
 	adaptor.Init(relayInfo)
 	var requestBody io.Reader
 
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled {
+	if shouldUsePassThrough(adaptor, relayInfo) {
 		body, err := common.GetRequestBody(c)
 		if err != nil {
 			return service.OpenAIErrorWrapperLocal(err, "get_request_body_failed", http.StatusInternalServerError)
@@ -535,7 +534,7 @@ func createTokenCountServiceError(message string) *dto.OpenAIErrorWithStatusCode
 	return &dto.OpenAIErrorWithStatusCode{
 		Error: dto.OpenAIError{
 			Type:    "api_error",
-			Code:    "api_error", 
+			Code:    "api_error",
 			Message: message,
 		},
 		StatusCode: http.StatusServiceUnavailable,
@@ -555,7 +554,7 @@ func getAndValidateTokenCountRequest(c *gin.Context, relayInfo *relaycommon.Rela
 
 	// Validate that the model supports token counting
 	if !dto.IsTokenCountSupportedModel(textRequest.Model) {
-		return nil, fmt.Errorf("model '%s' does not support token counting. Supported models: %s", 
+		return nil, fmt.Errorf("model '%s' does not support token counting. Supported models: %s",
 			textRequest.Model, strings.Join(dto.TokenCountSupportedModels, ", "))
 	}
 
@@ -591,10 +590,10 @@ func validateTokenCountMessageContent(messages []dto.Message) error {
 				if content.Type != "text" && content.Type != "image" {
 					// Claude supports text and image content for token counting
 					// Other types like audio, video, etc. are not supported
-					return fmt.Errorf("unsupported media type '%s' in message %d, content block %d. Token counting supports text and image content only", 
+					return fmt.Errorf("unsupported media type '%s' in message %d, content block %d. Token counting supports text and image content only",
 						content.Type, i+1, j+1)
 				}
-				
+
 				// Additional validation for image content
 				if content.Type == "image" {
 					imageMedia := content.GetImageMedia()
@@ -603,7 +602,7 @@ func validateTokenCountMessageContent(messages []dto.Message) error {
 					}
 					// Note: Claude API handles various image formats, so we don't need to restrict to base64 only
 				}
-				
+
 				// Additional validation for unsupported audio content
 				if content.Type == "input_audio" {
 					return fmt.Errorf("audio content is not supported for token counting in message %d, content block %d", i+1, j+1)
