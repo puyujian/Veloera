@@ -33,7 +33,6 @@ import (
 	"veloera/relay/helper"
 	"veloera/service"
 	"veloera/setting"
-	"veloera/setting/model_setting"
 )
 
 func getAndValidateResponsesRequest(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*dto.OpenAIResponsesRequest, error) {
@@ -198,7 +197,7 @@ func prepareAndSendRequest(c *gin.Context, relayInfo *relaycommon.RelayInfo, req
 }
 
 func prepareRequestBody(c *gin.Context, relayInfo *relaycommon.RelayInfo, req *dto.OpenAIResponsesRequest, adaptor interface{}) (io.Reader, *dto.OpenAIErrorWithStatusCode) {
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled {
+	if shouldUsePassThrough(adaptor, relayInfo) {
 		body, err := common.GetRequestBody(c)
 		if err != nil {
 			return nil, service.OpenAIErrorWrapperLocal(err, "get_request_body_error", http.StatusInternalServerError)

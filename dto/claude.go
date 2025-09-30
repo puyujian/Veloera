@@ -240,6 +240,7 @@ type TokenCountResponse struct {
 
 // TokenCountSupportedModels contains the list of Claude models that support token counting
 var TokenCountSupportedModels = []string{
+	"claude-sonnet-4-5-20250929",
 	"claude-opus-4-1-20250805",
 	"claude-opus-4-20241022",
 	"claude-sonnet-4-20250514",

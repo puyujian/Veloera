@@ -243,3 +243,8 @@ func (a *Adaptor) GetModelList() []string {
 func (a *Adaptor) GetChannelName() string {
 	return ChannelName
 }
+
+// SupportsOpenAIPassThrough reports whether the current request mode accepts OpenAI-compatible payloads.
+func (a *Adaptor) SupportsOpenAIPassThrough(*relaycommon.RelayInfo) bool {
+	return a.RequestMode == RequestModeLlama
+}
