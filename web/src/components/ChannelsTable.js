@@ -1206,6 +1206,10 @@ const ChannelsTable = () => {
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
   const [deletingFailedModels, setDeletingFailedModels] = useState(false);
   const [showFailedPreview, setShowFailedPreview] = useState(false);
+  // 失败预览使用的全量失败结果列表（跨页聚合）
+  const [allFailedBatchJobResults, setAllFailedBatchJobResults] = useState([]);
+  // 刷新失败预览的加载状态
+  const [refreshingFailedPreview, setRefreshingFailedPreview] = useState(false);
   const [retryingResultMap, setRetryingResultMap] = useState({});
 
   const removeRecord = (record) => {
@@ -1576,6 +1580,8 @@ const ChannelsTable = () => {
     }
     if (!keepPreview) {
       setShowFailedPreview(false);
+      setAllFailedBatchJobResults([]);
+      setRefreshingFailedPreview(false);
     }
     try {
       const res = await API.get(`/api/channel/test/jobs/${jobId}`);
@@ -1634,6 +1640,52 @@ const ChannelsTable = () => {
         setBatchJobResultsLoading(false);
       }
     }
+  };
+
+  // 拉取任务下全部失败结果（跨页聚合），用于失败预览
+  const fetchAllFailedBatchJobResults = async (jobId) => {
+    if (!jobId) {
+      return [];
+    }
+    const pageSize = 200; // 后端单页上限，尽量减少分页次数
+    let page = 1;
+    const aggregated = [];
+    setBatchJobResultsLoading(true);
+    try {
+      // 逐页遍历直至抓取完毕
+      while (true) {
+        const res = await API.get(
+          `/api/channel/test/jobs/${jobId}/results?page=${page}&page_size=${pageSize}`,
+        );
+        const { success, message, data } = res.data || {};
+        if (!success) {
+          if (page === 1) {
+            showError(message || t('获取测试结果失败'));
+          }
+          break;
+        }
+        const items = Array.isArray(data?.results) ? data.results : [];
+        const mapped = items
+          .filter((item) => !item.success && item.result_status !== 'DELETED')
+          .map((item, index) => ({
+            ...item,
+            key: item.id || `${item.channel_id}-${item.model_name}-${(page - 1) * pageSize + index}`,
+          }));
+        aggregated.push(...mapped);
+
+        const total = data?.total || 0;
+        // 若本页不足 pageSize 或已达到总数，则终止
+        if (items.length < pageSize || page * pageSize >= total) {
+          break;
+        }
+        page += 1;
+      }
+    } catch (error) {
+      showError(error?.message || t('获取测试结果失败'));
+    } finally {
+      setBatchJobResultsLoading(false);
+    }
+    return aggregated;
   };
 
   const handleBatchJobResultPageChange = async (page) => {
@@ -1738,39 +1790,62 @@ const ChannelsTable = () => {
     });
   };
 
+  // 使用后端统计的失败总数（已排除已删除项），避免被单页数据限制
   const failedResultCount = React.useMemo(
-    () =>
-      batchJobResults.filter(
-        (item) => !item.success && item.result_status !== 'DELETED',
-      ).length,
-    [batchJobResults],
+    () => (activeBatchJob && typeof activeBatchJob.failure_count === 'number' ? activeBatchJob.failure_count : 0),
+    [activeBatchJob],
   );
 
   const displayedBatchJobResults = React.useMemo(() => {
     if (!showFailedPreview) {
       return batchJobResults;
     }
-    return batchJobResults.filter(
-      (item) => !item.success && item.result_status !== 'DELETED',
-    );
-  }, [batchJobResults, showFailedPreview]);
+    return allFailedBatchJobResults;
+  }, [batchJobResults, showFailedPreview, allFailedBatchJobResults]);
 
-  const toggleFailedPreview = () => {
-    if (!batchJobResults || batchJobResults.length === 0) {
-      showInfo(t('暂无测试结果，无法预览失败模型'));
+  const toggleFailedPreview = async () => {
+    if (!activeBatchJob) {
       return;
     }
-    if (!showFailedPreview) {
-      if (failedResultCount === 0) {
-        showInfo(t('当前没有失败的模型'));
-        return;
-      }
-      showInfo(t('已切换到失败模型预览模式'));
-      setShowFailedPreview(true);
-      setBatchJobResultsPage(1);
+    // 关闭预览 → 恢复分页视图
+    if (showFailedPreview) {
+      setShowFailedPreview(false);
+      setAllFailedBatchJobResults([]);
+      setRefreshingFailedPreview(false);
       return;
     }
-    setShowFailedPreview(false);
+
+    // 开启预览 → 拉取任务下全部失败记录
+    if (failedResultCount === 0) {
+      showInfo(t('当前没有失败的模型'));
+      return;
+    }
+    const allFailed = await fetchAllFailedBatchJobResults(activeBatchJob.id);
+    if (!allFailed || allFailed.length === 0) {
+      showInfo(t('当前没有失败的模型'));
+      return;
+    }
+    setAllFailedBatchJobResults(allFailed);
+    setShowFailedPreview(true);
+    setBatchJobResultsPage(1);
+    showInfo(t('已切换到失败模型预览模式'));
+  };
+
+  // 刷新失败预览（仅预览模式显示）
+  const handleRefreshFailedPreview = async () => {
+    if (!activeBatchJob || !showFailedPreview) {
+      return;
+    }
+    setRefreshingFailedPreview(true);
+    try {
+      const allFailed = await fetchAllFailedBatchJobResults(activeBatchJob.id);
+      setAllFailedBatchJobResults(allFailed || []);
+      showSuccess(t('失败预览已刷新'));
+    } catch (e) {
+      // fetchAllFailedBatchJobResults 内部已做错误提示，这里保持安静
+    } finally {
+      setRefreshingFailedPreview(false);
+    }
   };
 
   const handleRetrySingleResult = async (record) => {
@@ -2178,12 +2253,21 @@ const ChannelsTable = () => {
               size='small'
               type={showFailedPreview ? 'primary' : 'warning'}
               onClick={toggleFailedPreview}
-              disabled={!showFailedPreview && (batchJobResults.length === 0 || failedResultCount === 0)}
+              disabled={!showFailedPreview && failedResultCount === 0}
             >
               {showFailedPreview
                 ? t('退出失败预览')
                 : `${t('预览失败模型')} (${failedResultCount})`}
             </Button>
+            {showFailedPreview && (
+              <Button
+                size='small'
+                onClick={handleRefreshFailedPreview}
+                loading={refreshingFailedPreview}
+              >
+                {refreshingFailedPreview ? t('刷新中...') : t('刷新失败预览')}
+              </Button>
+            )}
             <Button
               type='danger'
               size='small'
@@ -4485,6 +4569,9 @@ const ChannelsTable = () => {
           setActiveBatchJob(null);
           setBatchJobDetail(null);
           setBatchJobResults([]);
+          setAllFailedBatchJobResults([]);
+          setShowFailedPreview(false);
+          setRefreshingFailedPreview(false);
           setBatchJobResultsPage(1);
           setBatchJobResultsTotal(0);
         }}
