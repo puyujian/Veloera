@@ -381,18 +381,19 @@ func checkRequestSensitive(textRequest *dto.GeneralOpenAIRequest, info *relaycom
 
 // 预扣费并返回用户剩余配额
 func preConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommon.RelayInfo) (int, int, *dto.OpenAIErrorWithStatusCode) {
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+	userBalance, err := model.GetUserQuotaBalance(relayInfo.UserId, false)
 	if err != nil {
 		return 0, 0, service.OpenAIErrorWrapperLocal(err, "get_user_quota_failed", http.StatusInternalServerError)
 	}
-	if userQuota <= 0 {
+	totalQuota := userBalance.Total()
+	if totalQuota <= 0 {
 		return 0, 0, service.OpenAIErrorWrapperLocal(errors.New("user quota is not enough"), "insufficient_user_quota", http.StatusForbidden)
 	}
-	if userQuota-preConsumedQuota < 0 {
-		return 0, 0, service.OpenAIErrorWrapperLocal(fmt.Errorf("chat pre-consumed quota failed, user quota: %s, need quota: %s", common.FormatQuota(userQuota), common.FormatQuota(preConsumedQuota)), "insufficient_user_quota", http.StatusForbidden)
+	if totalQuota-preConsumedQuota < 0 {
+		return 0, 0, service.OpenAIErrorWrapperLocal(fmt.Errorf("chat pre-consumed quota failed, user quota: %s, need quota: %s", common.FormatQuota(totalQuota), common.FormatQuota(preConsumedQuota)), "insufficient_user_quota", http.StatusForbidden)
 	}
-	relayInfo.UserQuota = userQuota
-	if userQuota > 100*preConsumedQuota {
+	relayInfo.UserQuota = totalQuota
+	if totalQuota > 100*preConsumedQuota {
 		// 用户额度充足，判断令牌额度是否充足
 		if !relayInfo.TokenUnlimited {
 			// 非无限令牌，判断令牌额度是否充足
@@ -400,13 +401,13 @@ func preConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 			if tokenQuota > 100*preConsumedQuota {
 				// 令牌额度充足，信任令牌
 				preConsumedQuota = 0
-				common.LogInfo(c, fmt.Sprintf("user %d quota %s and token %d quota %d are enough, trusted and no need to pre-consume", relayInfo.UserId, common.FormatQuota(userQuota), relayInfo.TokenId, tokenQuota))
+				common.LogInfo(c, fmt.Sprintf("user %d quota %s and token %d quota %d are enough, trusted and no need to pre-consume", relayInfo.UserId, common.FormatQuota(totalQuota), relayInfo.TokenId, tokenQuota))
 			}
 		} else {
 			// in this case, we do not pre-consume quota
 			// because the user has enough quota
 			preConsumedQuota = 0
-			common.LogInfo(c, fmt.Sprintf("user %d with unlimited token has enough quota %s, trusted and no need to pre-consume", relayInfo.UserId, common.FormatQuota(userQuota)))
+			common.LogInfo(c, fmt.Sprintf("user %d with unlimited token has enough quota %s, trusted and no need to pre-consume", relayInfo.UserId, common.FormatQuota(totalQuota)))
 		}
 	}
 
@@ -415,12 +416,17 @@ func preConsumeQuota(c *gin.Context, preConsumedQuota int, relayInfo *relaycommo
 		if err != nil {
 			return 0, 0, service.OpenAIErrorWrapperLocal(err, "pre_consume_token_quota_failed", http.StatusForbidden)
 		}
-		err = model.DecreaseUserQuota(relayInfo.UserId, preConsumedQuota)
-		if err != nil {
-			return 0, 0, service.OpenAIErrorWrapperLocal(err, "decrease_user_quota_failed", http.StatusInternalServerError)
+		subscriptionUsed, quotaUsed, consumeErr := model.ConsumeUserQuota(relayInfo.UserId, preConsumedQuota)
+		if consumeErr != nil {
+			rollbackErr := model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, preConsumedQuota)
+			if rollbackErr != nil {
+				common.LogError(c, fmt.Sprintf("failed to rollback token pre-consume for user %d token %d: %s", relayInfo.UserId, relayInfo.TokenId, rollbackErr.Error()))
+			}
+			return 0, 0, service.OpenAIErrorWrapperLocal(consumeErr, "decrease_user_quota_failed", http.StatusInternalServerError)
 		}
+		relayInfo.TrackConsumedQuota(subscriptionUsed, quotaUsed)
 	}
-	return preConsumedQuota, userQuota, nil
+	return preConsumedQuota, totalQuota, nil
 }
 
 func returnPreConsumedQuota(c *gin.Context, relayInfo *relaycommon.RelayInfo, userQuota int, preConsumedQuota int) {
