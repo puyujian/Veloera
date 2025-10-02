@@ -80,33 +80,35 @@ type RelayInfo struct {
 	UpstreamModelName string
 	OriginModelName   string
 	//RecodeModelName      string
-	RequestURLPath       string
-	ApiVersion           string
-	PromptTokens         int
-	ApiKey               string
-	Organization         string
-	BaseUrl              string
-	SupportStreamOptions bool
-	ShouldIncludeUsage   bool
-	IsModelMapped        bool
-	ClientWs             *websocket.Conn
-	TargetWs             *websocket.Conn
-	InputAudioFormat     string
-	OutputAudioFormat    string
-	RealtimeTools        []dto.RealTimeTool
-	IsFirstRequest       bool
-	AudioUsage           bool
-	ReasoningEffort      string
-	ChannelSetting       map[string]interface{}
-	ParamOverride        map[string]interface{}
-	UserSetting          map[string]interface{}
-	UserEmail            string
-	UserQuota            int
-	RelayFormat          string
-	SendResponseCount    int
-	ChannelCreateTime    int64
-	PromptMessages       interface{}            // 保存请求的消息内容
-	Other                map[string]interface{} // 用于存储额外信息，如输入输出内容
+	RequestURLPath            string
+	ApiVersion                string
+	PromptTokens              int
+	ApiKey                    string
+	Organization              string
+	BaseUrl                   string
+	SupportStreamOptions      bool
+	ShouldIncludeUsage        bool
+	IsModelMapped             bool
+	ClientWs                  *websocket.Conn
+	TargetWs                  *websocket.Conn
+	InputAudioFormat          string
+	OutputAudioFormat         string
+	RealtimeTools             []dto.RealTimeTool
+	IsFirstRequest            bool
+	AudioUsage                bool
+	ReasoningEffort           string
+	ChannelSetting            map[string]interface{}
+	ParamOverride             map[string]interface{}
+	UserSetting               map[string]interface{}
+	UserEmail                 string
+	UserQuota                 int
+	ConsumedSubscriptionQuota int
+	ConsumedQuota             int
+	RelayFormat               string
+	SendResponseCount         int
+	ChannelCreateTime         int64
+	PromptMessages            interface{}            // 保存请求的消息内容
+	Other                     map[string]interface{} // 用于存储额外信息，如输入输出内容
 	ThinkingContentInfo
 	*ClaudeConvertInfo
 	*RerankerInfo
@@ -266,6 +268,30 @@ func GenRelayInfo(c *gin.Context) *RelayInfo {
 
 func (info *RelayInfo) SetPromptTokens(promptTokens int) {
 	info.PromptTokens = promptTokens
+}
+
+func (info *RelayInfo) TrackConsumedQuota(subscriptionUsed, quotaUsed int) {
+	if subscriptionUsed > 0 {
+		info.ConsumedSubscriptionQuota += subscriptionUsed
+	}
+	if quotaUsed > 0 {
+		info.ConsumedQuota += quotaUsed
+	}
+}
+
+func (info *RelayInfo) TrackRefundedQuota(subscriptionRefund, quotaRefund int) {
+	if subscriptionRefund > 0 {
+		info.ConsumedSubscriptionQuota -= subscriptionRefund
+		if info.ConsumedSubscriptionQuota < 0 {
+			info.ConsumedSubscriptionQuota = 0
+		}
+	}
+	if quotaRefund > 0 {
+		info.ConsumedQuota -= quotaRefund
+		if info.ConsumedQuota < 0 {
+			info.ConsumedQuota = 0
+		}
+	}
 }
 
 func (info *RelayInfo) SetIsStream(isStream bool) {
