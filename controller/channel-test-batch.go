@@ -64,7 +64,7 @@ func sanitizeStringList(list []string) []string {
 func StartChannelBatchTest(c *gin.Context) {
     var req batchModelTestRequest
     if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": fmt.Sprintf("参数解析失败: %v", err),
         })
@@ -72,7 +72,7 @@ func StartChannelBatchTest(c *gin.Context) {
     }
 
     if !req.IncludeAll && len(req.ChannelIDs) == 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "请至少选择一个渠道或开启全量测试",
         })
@@ -88,7 +88,7 @@ func StartChannelBatchTest(c *gin.Context) {
     targetModels := sanitizeStringList(req.TargetModels)
 
     if testMode == model.ChannelTestJobModeSelected && len(targetModels) == 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "请至少选择一个需要测试的模型",
         })
@@ -117,7 +117,7 @@ func StartChannelBatchTest(c *gin.Context) {
     options.TargetModels = targetModels
 
     if err := job.SetOptions(options); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("保存任务配置失败: %v", err),
         })
@@ -125,7 +125,7 @@ func StartChannelBatchTest(c *gin.Context) {
     }
 
     if err := model.CreateChannelTestJob(job); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("创建任务失败: %v", err),
         })
@@ -134,7 +134,7 @@ func StartChannelBatchTest(c *gin.Context) {
 
     if err := channeltest.SubmitJob(job.ID); err != nil {
         _ = model.FinalizeChannelTestJob(job.ID, model.ChannelTestJobStatusFailed, err.Error())
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("任务提交失败: %v", err),
         })
@@ -163,7 +163,7 @@ func GetChannelTestAvailableModels(c *gin.Context) {
 
 	models, err := model.GetAllChannelModels(includeDisabled)
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": fmt.Sprintf("获取模型列表失败: %v", err),
 		})
@@ -181,7 +181,7 @@ func GetChannelBatchTestJobs(c *gin.Context) {
     limit, _ := strconv.Atoi(c.Query("limit"))
     jobs, err := model.ListChannelTestJobs(limit)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -200,7 +200,7 @@ func GetChannelBatchTestJobs(c *gin.Context) {
 func GetChannelBatchTestJob(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -209,7 +209,7 @@ func GetChannelBatchTestJob(c *gin.Context) {
 
     job, err := model.GetChannelTestJob(jobID)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -237,7 +237,7 @@ func GetChannelBatchTestJob(c *gin.Context) {
 func GetChannelBatchTestJobResults(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -256,7 +256,7 @@ func GetChannelBatchTestJobResults(c *gin.Context) {
 
     results, total, err := model.ListChannelTestResults(jobID, offset, pageSize)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -279,7 +279,7 @@ func GetChannelBatchTestJobResults(c *gin.Context) {
 func CancelChannelBatchTestJob(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -287,7 +287,7 @@ func CancelChannelBatchTestJob(c *gin.Context) {
     }
 
     if err := channeltest.CancelJob(jobID); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -304,7 +304,7 @@ func CancelChannelBatchTestJob(c *gin.Context) {
 func ExportChannelBatchTestJob(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err !=  nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -312,7 +312,7 @@ func ExportChannelBatchTestJob(c *gin.Context) {
     }
 
     if _, err := model.GetChannelTestJob(jobID); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -372,7 +372,7 @@ func ExportChannelBatchTestJob(c *gin.Context) {
 func RetryChannelBatchTestResult(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -381,7 +381,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
 
     resultID, err := strconv.ParseInt(c.Param("resultId"), 10, 64)
     if err != nil || resultID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的结果 ID",
         })
@@ -389,7 +389,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
     }
 
     if _, err := model.GetChannelTestJob(jobID); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -398,7 +398,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
 
     result, err := model.GetChannelTestResult(resultID)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -406,7 +406,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
     }
 
     if result.JobID != jobID {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "结果与任务不匹配",
         })
@@ -415,7 +415,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
 
     channel, err := model.GetChannelById(result.ChannelID, true)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("获取渠道信息失败: %v", err),
         })
@@ -451,7 +451,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
     }
 
     if err := model.UpdateChannelTestResult(resultID, updates); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("更新结果失败: %v", err),
         })
@@ -459,7 +459,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
     }
 
     if err := model.RefreshChannelTestJobStats(jobID); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("刷新任务统计失败: %v", err),
         })
@@ -468,7 +468,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
 
     refreshed, err := model.GetChannelTestResult(resultID)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("获取更新后的结果失败: %v", err),
         })
@@ -488,7 +488,7 @@ func RetryChannelBatchTestResult(c *gin.Context) {
 func RetryFailedModelsByJob(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -498,7 +498,7 @@ func RetryFailedModelsByJob(c *gin.Context) {
     var req batchRetryFailedRequest
     if c.Request != nil && c.Request.ContentLength != 0 {
         if err := c.ShouldBindJSON(&req); err != nil {
-            c.JSON(http.StatusOK, gin.H{
+            c.JSON(http.StatusBadRequest, gin.H{
                 "success": false,
                 "message": fmt.Sprintf("参数解析失败: %v", err),
             })
@@ -508,7 +508,7 @@ func RetryFailedModelsByJob(c *gin.Context) {
 
     job, err := model.GetChannelTestJob(jobID)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -516,7 +516,7 @@ func RetryFailedModelsByJob(c *gin.Context) {
     }
 
     if job.Status == model.ChannelTestJobStatusRunning || job.Status == model.ChannelTestJobStatusPending {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "任务未结束，无法执行批量重试",
         })
@@ -535,7 +535,7 @@ func RetryFailedModelsByJob(c *gin.Context) {
 
     var failedResults []model.ChannelTestResult
     if err := query.Order("id asc").Find(&failedResults).Error; err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("查询失败模型列表时出错: %v", err),
         })
@@ -675,7 +675,7 @@ func RetryFailedModelsByJob(c *gin.Context) {
     workerWG.Wait()
 
     if err := model.RefreshChannelTestJobStats(jobID); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("刷新任务统计失败: %v", err),
         })
@@ -701,7 +701,7 @@ func RetryFailedModelsByJob(c *gin.Context) {
 func DeleteFailedModelsByJob(c *gin.Context) {
     jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
     if err != nil || jobID <= 0 {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "无效的任务 ID",
         })
@@ -710,7 +710,7 @@ func DeleteFailedModelsByJob(c *gin.Context) {
 
     var req batchDeleteFailedRequest
     if err := c.ShouldBindJSON(&req); err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": fmt.Sprintf("参数解析失败: %v", err),
         })
@@ -719,7 +719,7 @@ func DeleteFailedModelsByJob(c *gin.Context) {
 
     job, err := model.GetChannelTestJob(jobID)
     if err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": err.Error(),
         })
@@ -727,7 +727,7 @@ func DeleteFailedModelsByJob(c *gin.Context) {
     }
 
     if job.Status == model.ChannelTestJobStatusRunning || job.Status == model.ChannelTestJobStatusPending {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusBadRequest, gin.H{
             "success": false,
             "message": "任务未结束，无法执行批量删除",
         })
@@ -741,7 +741,7 @@ func DeleteFailedModelsByJob(c *gin.Context) {
 
     var failedResults []model.ChannelTestResult
     if err := query.Find(&failedResults).Error; err != nil {
-        c.JSON(http.StatusOK, gin.H{
+        c.JSON(http.StatusInternalServerError, gin.H{
             "success": false,
             "message": fmt.Sprintf("查询失败模型列表时出错: %v", err),
         })
@@ -859,14 +859,14 @@ func DeleteFailedModelsByJob(c *gin.Context) {
 
     if !req.DryRun && len(markResultIDs) > 0 {
         if err := model.MarkChannelTestResultsDeleted(markResultIDs); err != nil {
-            c.JSON(http.StatusOK, gin.H{
+            c.JSON(http.StatusInternalServerError, gin.H{
                 "success": false,
                 "message": fmt.Sprintf("标记测试结果状态失败: %v", err),
             })
             return
         }
         if err := model.RefreshChannelTestJobStats(jobID); err != nil {
-            c.JSON(http.StatusOK, gin.H{
+            c.JSON(http.StatusInternalServerError, gin.H{
                 "success": false,
                 "message": fmt.Sprintf("刷新任务统计失败: %v", err),
             })
