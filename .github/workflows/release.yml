@@ -15,8 +15,8 @@ on:
         type: string
 
 jobs:
-  build-linux:
-    name: Build Linux Version
+  build-frontend:
+    name: Build Frontend
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,12 +31,12 @@ jobs:
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'pnpm'
           cache-dependency-path: 'web/pnpm-lock.yaml'
-      
+
       - name: Build Frontend
         env:
           CI: ""
@@ -44,35 +44,68 @@ jobs:
           cd web
           pnpm install
           VITE_REACT_APP_VERSION=$(git describe --tags) pnpm run build
-          cd ..
-      
+
+      - name: Upload Frontend build
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: web/dist
+          retention-days: 1
+
+  build-linux:
+    name: Build Linux Version
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch:
+          - amd64
+          - arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download Frontend build
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: web/dist
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: true
           cache-dependency-path: '**/go.sum'
-      
-      - name: Build Backend (amd64)
-        run: |
-          go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)' -extldflags '-static'" -o veloera-linux
-      
-      - name: Build Backend (arm64)
+
+      - name: Install cross-compiler for arm64
+        if: matrix.arch == 'arm64'
         run: |
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build Backend (amd64)
+        if: matrix.arch == 'amd64'
+        run: |
+          go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)' -extldflags '-static'" -o veloera-linux
+
+      - name: Build Backend (arm64)
+        if: matrix.arch == 'arm64'
+        run: |
           CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)' -extldflags '-static'" -o veloera-linux-arm64
 
-      - name: Upload Linux builds
+      - name: Upload Linux build
         uses: actions/upload-artifact@v4
         with:
-          name: linux-builds
-          path: |
-            veloera-linux
-            veloera-linux-arm64
+          name: linux-${{ matrix.arch }}
+          path: veloera-linux*
           retention-days: 1
 
   build-windows:
     name: Build Windows Version
+    needs: build-frontend
     runs-on: windows-latest
     defaults:
       run:
@@ -83,39 +116,24 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      - name: Download Frontend build
+        uses: actions/download-artifact@v4
         with:
-          version: 10
-          run_install: false
+          name: frontend-build
+          path: web/dist
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'web/pnpm-lock.yaml'
-      
-      - name: Build Frontend
-        env:
-          CI: ""
-        run: |
-          cd web
-          pnpm install
-          VITE_REACT_APP_VERSION=$(git describe --tags) pnpm run build
-          cd ..
-      
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: true
           cache-dependency-path: '**/go.sum'
-      
+
       - name: Build Backend
         run: |
           go build -ldflags "-s -w -X 'veloera/common.Version=$(git describe --tags)'" -o veloera-windows.exe
-      
-      - name: Upload Windows builds
+
+      - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
           name: windows-builds
@@ -124,46 +142,32 @@ jobs:
 
   build-macos:
     name: Build macOS Version
+    needs: build-frontend
     runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-      
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - name: Download Frontend build
+        uses: actions/download-artifact@v4
         with:
-          node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: 'web/pnpm-lock.yaml'
-      
-      - name: Build Frontend
-        env:
-          CI: ""
-        run: |
-          cd web
-          pnpm install
-          VITE_REACT_APP_VERSION=$(git describe --tags) pnpm run build
-          cd ..
-      
+          name: frontend-build
+          path: web/dist
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
+          cache: true
           cache-dependency-path: '**/go.sum'
-      
+
       - name: Build Backend
         run: |
           go build -ldflags "-X 'veloera/common.Version=$(git describe --tags)'" -o veloera-macos
-      
-      - name: Upload macOS builds
+
+      - name: Upload macOS build
         uses: actions/upload-artifact@v4
         with:
           name: macos-builds

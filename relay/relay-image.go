@@ -114,7 +114,11 @@ func ImageHelper(c *gin.Context) *dto.OpenAIErrorWithStatusCode {
 		priceData.ModelPrice = 0.0025 * priceData.ModelRatio
 	}
 
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+	userBalance, err := model.GetUserQuotaBalance(relayInfo.UserId, false)
+	if err != nil {
+		return service.OpenAIErrorWrapperLocal(err, "get_user_quota_failed", http.StatusInternalServerError)
+	}
+	totalQuota := userBalance.Total()
 
 	sizeRatio := 1.0
 	// Size
@@ -139,8 +143,8 @@ func ImageHelper(c *gin.Context) *dto.OpenAIErrorWithStatusCode {
 	priceData.ModelPrice *= sizeRatio * qualityRatio * float64(imageRequest.N)
 	quota := int(priceData.ModelPrice * priceData.GroupRatio * common.QuotaPerUnit)
 
-	if userQuota-quota < 0 {
-		return service.OpenAIErrorWrapperLocal(fmt.Errorf("image pre-consumed quota failed, user quota: %s, need quota: %s", common.FormatQuota(userQuota), common.FormatQuota(quota)), "insufficient_user_quota", http.StatusForbidden)
+	if totalQuota-quota < 0 {
+		return service.OpenAIErrorWrapperLocal(fmt.Errorf("image pre-consumed quota failed, user quota: %s, need quota: %s", common.FormatQuota(totalQuota), common.FormatQuota(quota)), "insufficient_user_quota", http.StatusForbidden)
 	}
 
 	adaptor := GetAdaptor(relayInfo.ApiType)
@@ -200,6 +204,6 @@ func ImageHelper(c *gin.Context) *dto.OpenAIErrorWithStatusCode {
 	logContent := fmt.Sprintf("大小 %s, 品质 %s", imageRequest.Size, quality)
 	// 标记响应已写入，用于空回复检测
 	c.Set("response_written", true)
-	postConsumeQuota(c, relayInfo, usage, 0, userQuota, priceData, logContent)
+	postConsumeQuota(c, relayInfo, usage, 0, totalQuota, priceData, logContent)
 	return nil
 }

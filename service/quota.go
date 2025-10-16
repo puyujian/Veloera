@@ -94,10 +94,12 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	if relayInfo.UsePrice {
 		return nil
 	}
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+	userBalance, err := model.GetUserQuotaBalance(relayInfo.UserId, false)
 	if err != nil {
 		return err
 	}
+	totalQuota := userBalance.Total()
+	relayInfo.UserQuota = totalQuota
 
 	token, err := model.GetTokenByKey(strings.TrimLeft(relayInfo.TokenKey, "sk-"), false)
 	if err != nil {
@@ -129,8 +131,8 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 
 	quota := calculateAudioQuota(quotaInfo)
 
-	if userQuota < quota {
-		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", common.FormatQuota(userQuota), common.FormatQuota(quota))
+	if totalQuota < quota {
+		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", common.FormatQuota(totalQuota), common.FormatQuota(quota))
 	}
 
 	if !token.UnlimitedQuota && token.RemainQuota < quota {
@@ -392,23 +394,69 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (err error) {
 
+	var subscriptionUsed, quotaUsed int
 	if quota > 0 {
-		err = model.DecreaseUserQuota(relayInfo.UserId, quota)
-	} else {
-		err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
-	}
-	if err != nil {
-		return err
+		var consumeErr error
+		subscriptionUsed, quotaUsed, consumeErr = model.ConsumeUserQuota(relayInfo.UserId, quota)
+		if consumeErr != nil {
+			return consumeErr
+		}
+		relayInfo.TrackConsumedQuota(subscriptionUsed, quotaUsed)
+	} else if quota < 0 {
+		refundTotal := -quota
+		subscriptionRefund := 0
+		quotaRefund := 0
+		if relayInfo != nil {
+			if relayInfo.ConsumedSubscriptionQuota > 0 {
+				available := relayInfo.ConsumedSubscriptionQuota
+				if refundTotal < available {
+					subscriptionRefund = refundTotal
+				} else {
+					subscriptionRefund = available
+				}
+			}
+			refundTotal -= subscriptionRefund
+			if refundTotal > 0 && relayInfo.ConsumedQuota > 0 {
+				available := relayInfo.ConsumedQuota
+				if refundTotal < available {
+					quotaRefund = refundTotal
+				} else {
+					quotaRefund = available
+				}
+			}
+			refundTotal -= quotaRefund
+		}
+		if refundTotal > 0 {
+			quotaRefund += refundTotal
+		}
+		if subscriptionRefund > 0 || quotaRefund > 0 {
+			err = model.RestoreUserQuota(relayInfo.UserId, subscriptionRefund, quotaRefund)
+			if err != nil {
+				return err
+			}
+			relayInfo.TrackRefundedQuota(subscriptionRefund, quotaRefund)
+		}
 	}
 
 	if !relayInfo.IsPlayground {
 		if quota > 0 {
-			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-		} else {
+			tokenErr := model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
+			if tokenErr != nil {
+				if subscriptionUsed > 0 || quotaUsed > 0 {
+					rollbackErr := model.RestoreUserQuota(relayInfo.UserId, subscriptionUsed, quotaUsed)
+					if rollbackErr != nil {
+						common.SysError(fmt.Sprintf("failed to rollback user quota for user %d after token consume error: %s", relayInfo.UserId, rollbackErr.Error()))
+					} else {
+						relayInfo.TrackRefundedQuota(subscriptionUsed, quotaUsed)
+					}
+				}
+				return tokenErr
+			}
+		} else if quota < 0 {
 			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
-		}
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
 		}
 	}
 

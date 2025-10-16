@@ -3,7 +3,7 @@ name: Manual Docker Build
 on:
   # 提交时自动触发（但排除同步机器人的提交）
   push:
-    分支:
+    branches:
       - main
   # 支持手动触发（可选参数）
   workflow_dispatch:
@@ -11,26 +11,26 @@ on:
       tag:
         description: '镜像标签 (默认为 latest)'
         required: false
-        默认: 'latest'
-        输入: string
+        default: 'latest'
+        type: string
       registry:
         description: '镜像仓库'
         required: false
-        默认: 'ghcr.io'
-        输入: choice
+        default: 'ghcr.io'
+        type: choice
         options:
         - ghcr.io
         - docker.io
       push_to_registry:
         description: '是否推送到镜像仓库'
         required: false
-        默认: true
-        输入: boolean
+        default: true
+        type: boolean
       platforms:
         description: '构建平台'
         required: false
         default: 'linux/amd64,linux/arm64'
-        输入: string
+        type: string
 
 jobs:
   docker-build:
@@ -46,7 +46,11 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
-    
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -97,26 +101,70 @@ jobs:
           images: |
             ${{ github.event_name == 'push' && 'ghcr.io' || inputs.registry || 'ghcr.io' }}/${{ steps.lowercase.outputs.owner }}/veloera
           tags: |
-            type=raw,value=${{ github.event_name == 'push' && 'latest' || inputs.tag || 'latest' }}
-            type=raw,value=${{ env.VERSION }}
-            type=sha
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ !endsWith(github.ref, '-alpha') && !endsWith(github.ref, '-beta') }}
+            type=raw,value=alpha,enable=${{ endsWith(github.ref, '-alpha') }}
+            type=raw,value=beta,enable=${{ endsWith(github.ref, '-beta') }}
+          flavor: |
+            suffix=-${{ matrix.platform == 'linux/amd64' && 'amd64' || 'arm64' }}
 
       - name: 构建并推送 Docker 镜像
         uses: docker/build-push-action@v5
         with:
           context: .
-          # 自动构建只构建 amd64，手动构建支持多平台
-          platforms: ${{ github.event_name == 'push' && 'linux/amd64' || inputs.platforms || 'linux/amd64,linux/arm64' }}
+          platforms: ${{ matrix.platform }}
           push: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push_to_registry != false) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Use GitHub Actions cache for better performance
+          cache-from: type=gha,scope=build-${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.platform }}
           build-args: |
             VERSION=${{ env.VERSION }}
             BUILD_DATE=${{ env.BUILD_DATE }}
             BUILDKIT_INLINE_CACHE=1
-          # 使用 GitHub Actions cache 提升构建速度
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Set output to suppress verbose logs
+          outputs: type=image,name=target,annotation-index.org.opencontainers.image.description=Docker image for ${{ github.repository }}
+
+  merge_manifests:
+    name: Create multi-arch manifest
+    runs-on: ubuntu-latest
+    needs: docker-build
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Login to Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 设置小写仓库所有者
+        id: lowercase
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ steps.lowercase.outputs.owner }}/veloera
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ !endsWith(github.ref, '-alpha') && !endsWith(github.ref, '-beta') }}
+            type=raw,value=alpha,enable=${{ endsWith(github.ref, '-alpha') }}
+            type=raw,value=beta,enable=${{ endsWith(github.ref, '-beta') }}
+
+      - name: Create and push multi-arch manifest
+        run: |
+          TAGS="${{ steps.meta.outputs.tags }}"
+          for TAG in $TAGS; do
+            docker buildx imagetools create -t $TAG \
+              ${TAG}-amd64 \
+              ${TAG}-arm64
+          done
 
       - name: 构建结果摘要
         if: always()
@@ -125,11 +173,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**构建信息:**" >> $GITHUB_STEP_SUMMARY
           echo "- 版本: \`${{ env.VERSION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 标签: \`${{ github.event_name == 'push' && 'latest' || inputs.tag || 'latest' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 仓库: \`${{ github.event_name == 'push' && 'ghcr.io' || inputs.registry || 'ghcr.io' }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 平台: \`${{ github.event_name == 'push' && 'linux/amd64' || inputs.platforms || 'linux/amd64,linux/arm64' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 仓库: \`ghcr.io/${{ steps.lowercase.outputs.owner }}/veloera\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 平台: \`linux/amd64,linux/arm64\`" >> $GITHUB_STEP_SUMMARY
           echo "- 触发方式: \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 推送状态: \`${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push_to_registry != false) }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**镜像标签:**" >> $GITHUB_STEP_SUMMARY
           echo '${{ steps.meta.outputs.tags }}' | sed 's/^/- `/' | sed 's/$/`/' >> $GITHUB_STEP_SUMMARY
