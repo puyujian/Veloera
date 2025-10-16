@@ -60,6 +60,7 @@ var PasswordRegisterEnabled = true
 var EmailVerificationEnabled = false
 var GitHubOAuthEnabled = false
 var LinuxDOOAuthEnabled = false
+var IDCFlareOAuthEnabled = false
 var WeChatAuthEnabled = false
 var TelegramOAuthEnabled = false
 var TurnstileCheckEnabled = false
@@ -98,6 +99,9 @@ var GitHubClientSecret = ""
 var LinuxDOClientId = ""
 var LinuxDOClientSecret = ""
 var LinuxDOMinimumTrustLevel = 0
+var IDCFlareClientId = ""
+var IDCFlareClientSecret = ""
+var IDCFlareMinimumTrustLevel = 0
 
 var WeChatServerAddress = ""
 var WeChatServerToken = ""

@@ -40,6 +40,7 @@ type OAuthProvider string
 const (
 	ProviderGitHub   OAuthProvider = "GitHub"
 	ProviderLinuxDO  OAuthProvider = "Linux DO"
+	ProviderIDCFlare OAuthProvider = "IDC Flare"
 	ProviderOIDC     OAuthProvider = "OIDC"
 	ProviderTelegram OAuthProvider = "Telegram"
 )
@@ -229,6 +230,8 @@ func handleOAuthBind(c *gin.Context, oauthUser *OAuthUser, config *OAuthConfig,
 		user.GitHubId = oauthUser.ID
 	case ProviderLinuxDO:
 		user.LinuxDOId = oauthUser.ID
+	case ProviderIDCFlare:
+		user.IDCFlareId = oauthUser.ID
 	case ProviderOIDC:
 		user.OidcId = oauthUser.ID
 	case ProviderTelegram:
@@ -281,6 +284,28 @@ func createLinuxDOUser(user *model.User, oauthUser *OAuthUser, inviterId int) er
 
 	// Generate unique username
 	username, err := generateUniqueUsername("linuxdo")
+	if err != nil {
+		return err
+	}
+
+	user.Username = username
+	return user.Insert(inviterId)
+}
+
+// createIDCFlareUser creates a new user from IDC Flare OAuth data
+func createIDCFlareUser(user *model.User, oauthUser *OAuthUser, inviterId int) error {
+	// Check trust level requirement
+	if oauthUser.TrustLevel < common.IDCFlareMinimumTrustLevel {
+		return errors.New("信任等级未达到管理员设置的最低信任等级")
+	}
+
+	user.IDCFlareId = oauthUser.ID
+	user.DisplayName = oauthUser.DisplayName
+	user.Role = common.RoleCommonUser
+	user.Status = common.UserStatusEnabled
+
+	// Generate unique username
+	username, err := generateUniqueUsername("idcflare")
 	if err != nil {
 		return err
 	}

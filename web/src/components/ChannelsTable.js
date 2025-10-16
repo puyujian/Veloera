@@ -59,6 +59,9 @@ import {
   Layout,
   Radio,
   RadioGroup,
+  Spin,
+  Tabs,
+  Slider,
 } from '@douyinfe/semi-ui';
 import EditChannel from '../pages/Channel/EditChannel';
 import {
@@ -70,14 +73,24 @@ import {
   IconRefresh,
   IconSetting,
   IconCopy,
+  IconSearch,
 } from '@douyinfe/semi-icons';
 import { loadChannelModels } from './utils.js';
 import EditTagModal from '../pages/Channel/EditTagModal.js';
 import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
+const COMPACT_SCREEN_BREAKPOINT = 1100;
+const CheckboxGroup = Checkbox.Group;
+const getIsCompactScreen = () => {
+  if (typeof window === 'undefined') {
+    return true;
+  }
+  return isMobile() || window.innerWidth < COMPACT_SCREEN_BREAKPOINT;
+};
+
 function renderTimestamp(timestamp) {
-  return <>{timestamp2string(timestamp)}</>;
+  return <React.Fragment>{timestamp2string(timestamp)}</React.Fragment>;
 }
 
 // 辅助函数：获取失败的模型统计
@@ -211,7 +224,7 @@ const ModelTestContent = ({
           gap: '12px'
         }}>
           {!isBatchTesting && (
-            <>
+            <React.Fragment>
               <Typography.Text style={{ fontSize: '14px' }}>
                 {t('并发测试模型数')}:
               </Typography.Text>
@@ -223,7 +236,7 @@ const ModelTestContent = ({
                 style={{ width: '80px' }}
                 size='small'
               />
-            </>
+            </React.Fragment>
           )}
           
           <Button
@@ -427,6 +440,7 @@ const ModelTestContent = ({
 
 const ChannelsTable = () => {
   const { t } = useTranslation();
+  const [isCompactScreen, setIsCompactScreen] = useState(() => getIsCompactScreen());
 
   let type2label = undefined;
 
@@ -652,11 +666,11 @@ const ChannelsTable = () => {
       title: t('类型'),
       dataIndex: 'type',
       render: (text, record, index) => {
-        if (record.children === undefined) {
-          return <>{renderType(text)}</>;
-        } else {
-          return <>{renderTagType()}</>;
-        }
+          if (record.children === undefined) {
+            return <React.Fragment>{renderType(text)}</React.Fragment>;
+          } else {
+            return <React.Fragment>{renderTagType()}</React.Fragment>;
+          }
       },
     },
     {
@@ -760,7 +774,7 @@ const ChannelsTable = () => {
           );
         } else {
           return (
-            <>
+            <React.Fragment>
               <InputNumber
                 style={{ width: 70 }}
                 name='priority'
@@ -787,7 +801,7 @@ const ChannelsTable = () => {
                 defaultValue={record.priority}
                 min={-999}
               />
-            </>
+            </React.Fragment>
           );
         }
       },
@@ -941,7 +955,7 @@ const ChannelsTable = () => {
           );
         } else {
           return (
-            <>
+            <React.Fragment>
               <Button
                 theme='light'
                 type='secondary'
@@ -973,7 +987,7 @@ const ChannelsTable = () => {
               >
                 {t('编辑')}
               </Button>
-            </>
+            </React.Fragment>
           );
         }
       },
@@ -993,7 +1007,7 @@ const ChannelsTable = () => {
         visible={showColumnSelector}
         onCancel={() => setShowColumnSelector(false)}
         footer={
-          <>
+          <React.Fragment>
             <Button onClick={() => initDefaultColumns()}>{t('重置')}</Button>
             <Button onClick={() => setShowColumnSelector(false)}>
               {t('取消')}
@@ -1001,7 +1015,7 @@ const ChannelsTable = () => {
             <Button type='primary' onClick={() => setShowColumnSelector(false)}>
               {t('确定')}
             </Button>
-          </>
+          </React.Fragment>
         }
         style={{ width: isMobile() ? '90%' : 500 }}
         bodyStyle={{ padding: '24px' }}
@@ -1121,6 +1135,83 @@ const ChannelsTable = () => {
   const [batchTestDelay, setBatchTestDelay] = useState(200); // 批次间延迟(ms)
   // 批量测试控制
   const [batchTestAbortController, setBatchTestAbortController] = useState(null);
+
+  const createInitialBatchTestConfig = () => ({
+    channelScope: 'allEnabled',
+    modelScope: 'all',
+    modelWhitelist: '',
+    modelBlacklist: '',
+    useChannelDefault: true,
+    concurrency: 2,
+    intervalMs: 200,
+    retryLimit: 1,
+    testMode: 'all',
+    selectedModels: [],
+  });
+  const [showBatchTestConfig, setShowBatchTestConfig] = useState(false);
+  const [startingBatchTest, setStartingBatchTest] = useState(false);
+  const [batchTestConfigState, setBatchTestConfigState] = useState(
+    createInitialBatchTestConfig,
+  );
+  const [batchTestConfigMode, setBatchTestConfigMode] = useState('quick');
+  const [showAdvancedBatchConfig, setShowAdvancedBatchConfig] = useState(false);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [availableModelsLoading, setAvailableModelsLoading] = useState(false);
+  const [modelSelectorKeyword, setModelSelectorKeyword] = useState('');
+  const [showBatchJobPanel, setShowBatchJobPanel] = useState(false);
+  const [batchJobsLoading, setBatchJobsLoading] = useState(false);
+  const [batchJobs, setBatchJobs] = useState([]);
+  const [activeBatchJob, setActiveBatchJob] = useState(null);
+  const [batchJobDetail, setBatchJobDetail] = useState(null);
+  const [batchJobDetailLoading, setBatchJobDetailLoading] = useState(false);
+  const [batchJobResults, setBatchJobResults] = useState([]);
+  const [batchJobResultsPage, setBatchJobResultsPage] = useState(1);
+  const [batchJobResultsPageSize, setBatchJobResultsPageSize] = useState(20);
+  const [batchJobPanelTab, setBatchJobPanelTab] = useState('list');
+
+  const isQuickBatchConfig = batchTestConfigMode === 'quick';
+
+  const filteredAvailableModels = React.useMemo(() => {
+    if (!modelSelectorKeyword.trim()) {
+      return availableModels;
+    }
+    const keyword = modelSelectorKeyword.trim().toLowerCase();
+    return availableModels.filter((item) =>
+      item.toLowerCase().includes(keyword),
+    );
+  }, [availableModels, modelSelectorKeyword]);
+
+  useEffect(() => {
+    if (batchTestConfigMode === 'quick') {
+      setBatchTestConfigState((prev) => ({
+        ...prev,
+        testMode: 'all',
+        modelScope: 'all',
+        modelWhitelist: '',
+        modelBlacklist: '',
+        useChannelDefault: true,
+        selectedModels: [],
+      }));
+    }
+  }, [batchTestConfigMode]);
+
+  const quickScopeValue = React.useMemo(
+    () => (batchTestConfigState.channelScope === 'selected' ? 'selected' : 'all'),
+    [batchTestConfigState.channelScope],
+  );
+  const quickIncludeDisabled =
+    batchTestConfigState.channelScope === 'allWithDisabled';
+
+  const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
+  const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
+  const [deletingFailedModels, setDeletingFailedModels] = useState(false);
+  const [retryingFailedModels, setRetryingFailedModels] = useState(false);
+  const [showFailedPreview, setShowFailedPreview] = useState(false);
+  // 失败预览使用的全量失败结果列表（跨页聚合）
+  const [allFailedBatchJobResults, setAllFailedBatchJobResults] = useState([]);
+  // 刷新失败预览的加载状态
+  const [refreshingFailedPreview, setRefreshingFailedPreview] = useState(false);
+  const [retryingResultMap, setRetryingResultMap] = useState({});
 
   const removeRecord = (record) => {
     let newDataSource = [...channels];
@@ -1247,6 +1338,1117 @@ const ChannelsTable = () => {
     setLoading(false);
   };
 
+  const normalizeModelList = (value) => {
+    if (!value) {
+      return [];
+    }
+    return value
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  };
+
+  const sanitizeModelArray = (list) => {
+    if (!Array.isArray(list)) {
+      return [];
+    }
+    const result = [];
+    const seen = new Set();
+    list.forEach((item) => {
+      const trimmed = typeof item === 'string' ? item.trim() : '';
+      if (!trimmed || seen.has(trimmed)) {
+        return;
+      }
+      seen.add(trimmed);
+      result.push(trimmed);
+    });
+    return result;
+  };
+
+  const openBatchTestConfigModal = () => {
+    setBatchTestConfigState((prev) => {
+      const hasSelected = selectedChannels.length > 0;
+      let nextScope = prev.channelScope;
+      if (hasSelected) {
+        nextScope = prev.channelScope === 'allWithDisabled' ? 'allWithDisabled' : 'selected';
+      } else if (prev.channelScope === 'selected') {
+        nextScope = 'allEnabled';
+      }
+      return {
+        ...prev,
+        channelScope: nextScope,
+      };
+    });
+    setBatchTestConfigMode('quick');
+    setShowAdvancedBatchConfig(false);
+    setShowBatchTestConfig(true);
+  };
+
+  const closeBatchTestConfigModal = () => {
+    setShowBatchTestConfig(false);
+    setStartingBatchTest(false);
+  };
+
+  const resetBatchTestConfig = () => {
+    setBatchTestConfigState(createInitialBatchTestConfig());
+    setBatchTestConfigMode('quick');
+    setModelSelectorKeyword('');
+    setShowFailedPreview(false);
+    setShowAdvancedBatchConfig(false);
+  };
+
+  const fetchAvailableModels = async () => {
+    if (availableModelsLoading) {
+      return;
+    }
+    setAvailableModelsLoading(true);
+    try {
+      const res = await API.get('/api/channel/test/models', {
+        params: {
+          include_disabled: true,
+        },
+      });
+      const { success, data, message } = res.data;
+      if (!success) {
+        showError(message || t('获取模型列表失败'));
+      } else {
+        let candidates = [];
+        if (Array.isArray(data)) {
+          candidates = data;
+        } else if (data && Array.isArray(data.models)) {
+          candidates = data.models;
+        }
+        const unique = sanitizeModelArray(candidates).sort((a, b) =>
+          a.localeCompare(b, undefined, { sensitivity: 'base' }),
+        );
+        setAvailableModels(unique);
+      }
+    } catch (error) {
+      showError(error?.message || t('获取模型列表失败'));
+    } finally {
+      setAvailableModelsLoading(false);
+    }
+  };
+
+  const handleModelSelectionChange = (values) => {
+    setBatchTestConfigState((prev) => ({
+      ...prev,
+      selectedModels: sanitizeModelArray(values || []),
+    }));
+  };
+
+  const handleSelectAllFilteredModels = () => {
+    if (filteredAvailableModels.length === 0) {
+      return;
+    }
+    setBatchTestConfigState((prev) => {
+      const merged = new Set(prev.selectedModels || []);
+      filteredAvailableModels.forEach((item) => {
+        merged.add(item);
+      });
+      return {
+        ...prev,
+        selectedModels: sanitizeModelArray(Array.from(merged)),
+      };
+    });
+  };
+
+  const handleInvertFilteredModels = () => {
+    if (filteredAvailableModels.length === 0) {
+      return;
+    }
+    setBatchTestConfigState((prev) => {
+      const toggled = new Set(prev.selectedModels || []);
+      filteredAvailableModels.forEach((item) => {
+        if (toggled.has(item)) {
+          toggled.delete(item);
+        } else {
+          toggled.add(item);
+        }
+      });
+      return {
+        ...prev,
+        selectedModels: sanitizeModelArray(Array.from(toggled)),
+      };
+    });
+  };
+
+  const handleClearSelectedModels = () => {
+    setBatchTestConfigState((prev) => ({
+      ...prev,
+      selectedModels: [],
+    }));
+  };
+
+  const startBatchChannelTest = async () => {
+    if (startingBatchTest) {
+      return;
+    }
+    const config = batchTestConfigState;
+    const scope = config.channelScope;
+    let channelIds = [];
+    if (scope === 'selected' && selectedChannels.length > 0) {
+      channelIds = selectedChannels
+        .map((item) => item.id)
+        .filter((id) => typeof id === 'number' && id > 0);
+    }
+
+    if (scope === 'selected' && channelIds.length === 0) {
+      showWarning(t('请至少选择一个渠道或切换到全量测试'));
+      return;
+    }
+
+    const whitelist = normalizeModelList(config.modelWhitelist);
+    const blacklist = normalizeModelList(config.modelBlacklist);
+    const selectedModels = sanitizeModelArray(config.selectedModels);
+
+    if (config.testMode === 'selected' && selectedModels.length === 0) {
+      showWarning(t('请至少选择一个模型进行测试'));
+      return;
+    }
+
+    const payload = {
+      channel_ids: channelIds,
+      include_all: scope !== 'selected',
+      include_disabled: scope === 'allWithDisabled',
+      model_scope: config.modelScope,
+      model_whitelist: whitelist,
+      model_blacklist: blacklist,
+      use_channel_default: config.useChannelDefault,
+      concurrency: config.concurrency,
+      interval_ms: config.intervalMs,
+      retry_limit: config.retryLimit,
+      test_mode: config.testMode,
+      target_models: selectedModels,
+    };
+
+    setStartingBatchTest(true);
+    try {
+      const res = await API.post('/api/channel/test/batch', payload);
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('创建批量模型测试任务失败'));
+        return;
+      }
+      showSuccess(t('批量模型测试任务已创建，开始后台执行'));
+      closeBatchTestConfigModal();
+      resetBatchTestConfig();
+      setShowBatchJobPanel(true);
+      await fetchBatchJobs(true);
+      if (data?.job_id) {
+        await fetchBatchJobDetail(data.job_id, { silent: false });
+      }
+    } catch (error) {
+      showError(error?.message || t('创建批量模型测试任务失败'));
+    } finally {
+      setStartingBatchTest(false);
+    }
+  };
+
+  const fetchBatchJobs = async (silent = false) => {
+    if (!silent) {
+      setBatchJobsLoading(true);
+    }
+    try {
+      const res = await API.get('/api/channel/test/jobs?limit=50');
+      const { success, message, data } = res.data;
+      if (success) {
+        setBatchJobs(Array.isArray(data?.jobs) ? data.jobs : []);
+      } else {
+        showError(message || t('获取批量测试任务列表失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('获取批量测试任务列表失败'));
+    } finally {
+      if (!silent) {
+        setBatchJobsLoading(false);
+      }
+    }
+  };
+
+  const handleOpenBatchJobPanel = async () => {
+    setShowBatchJobPanel(true);
+    await fetchBatchJobs();
+  };
+
+  const fetchBatchJobDetail = async (jobId, options = {}) => {
+    if (!jobId) {
+      return;
+    }
+    const { silent = false, page, keepPreview = false } = options;
+    if (!silent) {
+      setBatchJobDetailLoading(true);
+    }
+    if (!keepPreview) {
+      setShowFailedPreview(false);
+      setAllFailedBatchJobResults([]);
+      setRefreshingFailedPreview(false);
+    }
+    try {
+      const res = await API.get(`/api/channel/test/jobs/${jobId}`);
+      const { success, message, data } = res.data;
+      if (success) {
+        setActiveBatchJob(data?.job || null);
+        setBatchJobDetail(data || null);
+        const targetPage = page || 1;
+        await fetchBatchJobResults(jobId, targetPage, batchJobResultsPageSize, true);
+        await fetchBatchJobs(true);
+      } else if (!silent) {
+        showError(message || t('获取任务详情失败'));
+      }
+    } catch (error) {
+      if (!silent) {
+        showError(error?.message || t('获取任务详情失败'));
+      }
+    } finally {
+      if (!silent) {
+        setBatchJobDetailLoading(false);
+      }
+    }
+  };
+
+  const fetchBatchJobResults = async (jobId, page = 1, pageSize = batchJobResultsPageSize, silent = false) => {
+    if (!jobId) {
+      return;
+    }
+    if (!silent) {
+      setBatchJobResultsLoading(true);
+    }
+    try {
+      const res = await API.get(
+        `/api/channel/test/jobs/${jobId}/results?page=${page}&page_size=${pageSize}`,
+      );
+      const { success, message, data } = res.data;
+      if (success) {
+        const items = Array.isArray(data?.results)
+          ? data.results.map((item, index) => ({
+              ...item,
+              key: item.id || `${item.channel_id}-${item.model_name}-${index}`,
+            }))
+          : [];
+        setBatchJobResults(items);
+        setBatchJobResultsTotal(data?.total || 0);
+        setBatchJobResultsPage(data?.page || page);
+      } else if (!silent) {
+        showError(message || t('获取测试结果失败'));
+      }
+    } catch (error) {
+      if (!silent) {
+        showError(error?.message || t('获取测试结果失败'));
+      }
+    } finally {
+      if (!silent) {
+        setBatchJobResultsLoading(false);
+      }
+    }
+  };
+
+  // 拉取任务下全部失败结果（跨页聚合），用于失败预览
+  const fetchAllFailedBatchJobResults = async (jobId) => {
+    if (!jobId) {
+      return [];
+    }
+    const pageSize = 200; // 后端单页上限，尽量减少分页次数
+    let page = 1;
+    const aggregated = [];
+    setBatchJobResultsLoading(true);
+    try {
+      // 逐页遍历直至抓取完毕
+      while (true) {
+        const res = await API.get(
+          `/api/channel/test/jobs/${jobId}/results?page=${page}&page_size=${pageSize}`,
+        );
+        const { success, message, data } = res.data || {};
+        if (!success) {
+          if (page === 1) {
+            showError(message || t('获取测试结果失败'));
+          }
+          break;
+        }
+        const items = Array.isArray(data?.results) ? data.results : [];
+        const mapped = items
+          .filter((item) => !item.success && item.result_status !== 'DELETED')
+          .map((item, index) => ({
+            ...item,
+            key: item.id || `${item.channel_id}-${item.model_name}-${(page - 1) * pageSize + index}`,
+          }));
+        aggregated.push(...mapped);
+
+        const total = data?.total || 0;
+        // 若本页不足 pageSize 或已达到总数，则终止
+        if (items.length < pageSize || page * pageSize >= total) {
+          break;
+        }
+        page += 1;
+      }
+    } catch (error) {
+      showError(error?.message || t('获取测试结果失败'));
+    } finally {
+      setBatchJobResultsLoading(false);
+    }
+    return aggregated;
+  };
+
+  const handleBatchJobResultPageChange = async (page) => {
+    if (!activeBatchJob) {
+      return;
+    }
+    await fetchBatchJobResults(activeBatchJob.id, page);
+  };
+
+  const handleCancelBatchJob = async (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    try {
+      const res = await API.post(`/api/channel/test/jobs/${jobId}/cancel`);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('已发送取消指令'));
+        await fetchBatchJobDetail(jobId, { silent: true });
+      } else {
+        showError(message || t('任务取消失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('任务取消失败'));
+    }
+  };
+
+  const handleExportBatchJob = async (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    try {
+      const res = await API.get(`/api/channel/test/jobs/${jobId}/export`, {
+        responseType: 'blob',
+      });
+      const disposition = res.headers?.['content-disposition'] || '';
+      let filename = `channel-test-report-${jobId}.csv`;
+      const match = disposition.match(/filename=([^;]+)/i);
+      if (match && match[1]) {
+        filename = decodeURIComponent(match[1].replace(/"/g, '').trim());
+      }
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      showSuccess(t('报告导出成功'));
+    } catch (error) {
+      showError(error?.message || t('导出报告失败'));
+    }
+  };
+
+
+  const handleBatchRetryFailedModels = (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    Modal.confirm({
+      title: t('确认批量重试失败模型'),
+      content: t('此操作将重新测试本次任务中全部失败的模型，操作期间请耐心等待，是否继续？'),
+      okText: t('确认重试'),
+      cancelText: t('取消'),
+      onOk: async () => {
+        setRetryingFailedModels(true);
+        try {
+          const res = await API.post(`/api/channel/test/jobs/${jobId}/retry_failed`);
+          const { success, message, data } = res.data || {};
+          if (success) {
+            const successCount = data?.success_count || 0;
+            const failureCount = data?.failure_count || 0;
+            const summary = Array.isArray(data?.summary) ? data.summary : [];
+            showSuccess(
+              t('批量重试失败模型完成，成功 {{success}} 条，失败 {{failure}} 条', {
+                success: successCount,
+                failure: failureCount,
+              }),
+            );
+            await refresh();
+            await fetchBatchJobDetail(jobId, {
+              silent: true,
+              keepPreview: showFailedPreview,
+              page: batchJobResultsPage,
+            });
+            setBatchJobDetail((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              return {
+                ...prev,
+                retrySummary: summary,
+              };
+            });
+            if (showFailedPreview) {
+              const allFailed = await fetchAllFailedBatchJobResults(jobId);
+              setAllFailedBatchJobResults(allFailed || []);
+            }
+          } else {
+            showError(message || t('批量重试失败模型失败'));
+          }
+        } catch (error) {
+          showError(error?.message || t('批量重试失败模型失败'));
+        } finally {
+          setRetryingFailedModels(false);
+        }
+      },
+    });
+  };
+
+  const handleBatchJobDeleteFailedModels = (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    Modal.confirm({
+      title: t('确认删除失败模型'),
+      content: t('此操作将移除本次任务中全部测试失败的模型，操作不可撤销，是否继续？'),
+      okText: t('确认删除'),
+      cancelText: t('取消'),
+      onOk: async () => {
+        setDeletingFailedModels(true);
+        try {
+          const res = await API.post(`/api/channel/test/jobs/${jobId}/delete_failed`, {
+            dry_run: false,
+          });
+          const { success, message, data } = res.data;
+          if (success) {
+            const deleted = data?.deleted || 0;
+            const summary = Array.isArray(data?.summary) ? data.summary : [];
+            showSuccess(
+              t('批量删除失败模型完成，共移除 {{count}} 个模型', {
+                count: deleted,
+              }),
+            );
+            setBatchJobDetail((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              return {
+                ...prev,
+                deleteSummary: summary,
+              };
+            });
+            setShowFailedPreview(false);
+            await refresh();
+            await fetchBatchJobDetail(jobId, { silent: true });
+          } else {
+            showError(message || t('批量删除失败模型失败'));
+          }
+        } catch (error) {
+          showError(error?.message || t('批量删除失败模型失败'));
+        } finally {
+          setDeletingFailedModels(false);
+        }
+      },
+    });
+  };
+
+  // 使用后端统计的失败总数（已排除已删除项），避免被单页数据限制
+  const failedResultCount = React.useMemo(
+    () => (activeBatchJob && typeof activeBatchJob.failure_count === 'number' ? activeBatchJob.failure_count : 0),
+    [activeBatchJob],
+  );
+
+  const displayedBatchJobResults = React.useMemo(() => {
+    if (!showFailedPreview) {
+      return batchJobResults;
+    }
+    return allFailedBatchJobResults;
+  }, [batchJobResults, showFailedPreview, allFailedBatchJobResults]);
+
+  const toggleFailedPreview = async () => {
+    if (!activeBatchJob) {
+      return;
+    }
+    // 关闭预览 → 恢复分页视图
+    if (showFailedPreview) {
+      setShowFailedPreview(false);
+      setAllFailedBatchJobResults([]);
+      setRefreshingFailedPreview(false);
+      return;
+    }
+
+    // 开启预览 → 拉取任务下全部失败记录
+    if (failedResultCount === 0) {
+      showInfo(t('当前没有失败的模型'));
+      return;
+    }
+    const allFailed = await fetchAllFailedBatchJobResults(activeBatchJob.id);
+    if (!allFailed || allFailed.length === 0) {
+      showInfo(t('当前没有失败的模型'));
+      return;
+    }
+    setAllFailedBatchJobResults(allFailed);
+    setShowFailedPreview(true);
+    setBatchJobResultsPage(1);
+    showInfo(t('已切换到失败模型预览模式'));
+  };
+
+  // 刷新失败预览（仅预览模式显示）
+  const handleRefreshFailedPreview = async () => {
+    if (!activeBatchJob || !showFailedPreview) {
+      return;
+    }
+    setRefreshingFailedPreview(true);
+    try {
+      const allFailed = await fetchAllFailedBatchJobResults(activeBatchJob.id);
+      setAllFailedBatchJobResults(allFailed || []);
+      showSuccess(t('失败预览已刷新'));
+    } catch (e) {
+      // fetchAllFailedBatchJobResults 内部已做错误提示，这里保持安静
+    } finally {
+      setRefreshingFailedPreview(false);
+    }
+  };
+
+  const handleRetrySingleResult = async (record) => {
+    if (!activeBatchJob || !record?.id) {
+      return;
+    }
+    setRetryingResultMap((prev) => ({ ...prev, [record.id]: true }));
+    try {
+      const res = await API.post(
+        `/api/channel/test/jobs/${activeBatchJob.id}/results/${record.id}/retry`,
+      );
+      const { success, message, data } = res.data;
+      if (success) {
+        const updatedResult = data?.result;
+        if (updatedResult) {
+          setBatchJobResults((prev) =>
+            prev.map((item) =>
+              item.id === updatedResult.id
+                ? { ...item, ...updatedResult, key: updatedResult.id || item.key }
+                : item,
+            ),
+          );
+        }
+        if (updatedResult?.success) {
+          showSuccess(t('模型重试成功'));
+        } else if (updatedResult) {
+          showWarning(
+            t('模型仍然失败：{{reason}}', {
+              reason: updatedResult.error_message || message || t('请稍后重试'),
+            }),
+          );
+        } else if (message) {
+          showInfo(message);
+        }
+        await fetchBatchJobDetail(activeBatchJob.id, {
+          silent: true,
+          keepPreview: showFailedPreview,
+          page: batchJobResultsPage,
+        });
+      } else {
+        showError(message || t('重试失败'));
+      }
+    } catch (error) {
+      showError(error?.message || t('重试失败'));
+    } finally {
+      setRetryingResultMap((prev) => {
+        const next = { ...prev };
+        delete next[record.id];
+        return next;
+      });
+    }
+  };
+
+  const isResultRetrying = React.useCallback(
+    (resultId) => Boolean(retryingResultMap[resultId]),
+    [retryingResultMap],
+  );
+
+  const renderJobStatusTag = (status) => {
+    const map = {
+      PENDING: { color: 'blue', text: t('排队中') },
+      RUNNING: { color: 'orange', text: t('运行中') },
+      SUCCESS: { color: 'green', text: t('已完成') },
+      FAILED: { color: 'red', text: t('失败') },
+      CANCELED: { color: 'grey', text: t('已取消') },
+    };
+    const info = map[status] || { color: 'grey', text: status };
+    return <Tag color={info.color}>{info.text}</Tag>;
+  };
+
+  const jobColumns = [
+    {
+      title: t('任务ID'),
+      dataIndex: 'id',
+      key: 'id',
+      width: 90,
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (_, record) => renderJobStatusTag(record.status),
+    },
+    {
+      title: t('通道数'),
+      dataIndex: 'total_channels',
+      key: 'total_channels',
+      width: 100,
+      render: (_, record) => record.total_channels || 0,
+    },
+    {
+      title: t('进度'),
+      key: 'progress',
+      render: (_, record) => {
+        if (!record.total_models) {
+          return '-';
+        }
+        return `${record.completed_count}/${record.total_models}`;
+      },
+    },
+    {
+      title: t('创建时间'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      width: 150,
+      render: (value) => (value ? timestamp2string(value) : '-'),
+    },
+    {
+      title: t('操作'),
+      key: 'actions',
+      width: 180,
+      render: (_, record) => (
+        <Space>
+          <Button
+            size='small'
+            onClick={(e) => {
+              e.stopPropagation();
+              fetchBatchJobDetail(record.id, { silent: false });
+            }}
+          >
+            {t('查看')}
+          </Button>
+          <Button
+            size='small'
+            disabled={record.status !== 'RUNNING' && record.status !== 'PENDING'}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleCancelBatchJob(record.id);
+            }}
+          >
+            {t('取消')}
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const jobResultColumns = [
+    {
+      title: t('渠道'),
+      dataIndex: 'channel_name',
+      key: 'channel_name',
+      width: 180,
+      render: (text) => (
+        <Typography.Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 160 }}>
+          {text || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: t('模型'),
+      dataIndex: 'model_name',
+      key: 'model_name',
+      width: 220,
+      render: (text) => (
+        <Typography.Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 200 }}>
+          {text || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: t('状态'),
+      dataIndex: 'success',
+      key: 'success',
+      width: 120,
+      render: (_, record) => {
+        if (record.result_status === 'DELETED') {
+          return <Tag color='grey'>{t('已删除')}</Tag>;
+        }
+        if (record.success) {
+          return <Tag color='green'>{t('成功')}</Tag>;
+        }
+        return <Tag color='red'>{t('失败')}</Tag>;
+      },
+    },
+    {
+      title: t('耗时'),
+      key: 'duration',
+      width: 100,
+      render: (_, record) =>
+        record.duration_millis ? `${(record.duration_millis / 1000).toFixed(2)}s` : '-',
+    },
+    {
+      title: t('重试次数'),
+      dataIndex: 'retry_count',
+      key: 'retry_count',
+      width: 100,
+    },
+    {
+      title: t('错误信息'),
+      dataIndex: 'error_message',
+      key: 'error_message',
+      render: (text) => (
+        <Typography.Text ellipsis={{ showTooltip: true }} style={{ maxWidth: 280 }}>
+          {text || '-'}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: t('操作'),
+      key: 'result_actions',
+      width: 160,
+      render: (_, record) => {
+        if (record.result_status === 'DELETED') {
+          return <Typography.Text type='tertiary'>{t('已删除')}</Typography.Text>;
+        }
+        if (record.success) {
+          return <Typography.Text type='tertiary'>-</Typography.Text>;
+        }
+        return (
+          <Button
+            size='small'
+            type='primary'
+            loading={isResultRetrying(record.id)}
+            onClick={() => handleRetrySingleResult(record)}
+          >
+            {isResultRetrying(record.id) ? t('重试中') : t('重试')}
+          </Button>
+        );
+      },
+    },
+  ];
+
+  const renderBatchJobListPanel = (compact = false) => {
+    // 小屏下不在表格内再套一层纵向滚动，避免与弹窗 Body 嵌套滚动造成遮挡
+    const tableScroll = compact ? { x: 'max-content' } : { x: 'max-content', y: 420 };
+    return (
+      <div
+        style={{
+          flex: compact ? 'none' : 1,
+          width: compact ? '100%' : '32%',
+          minWidth: compact ? '100%' : 280,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          // 小屏交由外层 Modal 滚动；大屏保持面板自身的弹性高度
+          maxHeight: compact ? 'none' : '72vh',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Typography.Text strong>{t('任务列表')}</Typography.Text>
+          <Button size='small' onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
+            {t('刷新')}
+          </Button>
+        </div>
+        <Table
+          size='small'
+          loading={batchJobsLoading}
+          columns={jobColumns}
+          dataSource={batchJobs.map((job) => ({ ...job, key: job.id }))}
+          pagination={false}
+          rowKey='id'
+          onRow={(record) => ({
+            onClick: () => {
+              fetchBatchJobDetail(record.id, { silent: false });
+              if (compact) {
+                setBatchJobPanelTab('detail');
+              }
+            },
+            style: { cursor: 'pointer' },
+          })}
+          scroll={tableScroll}
+          style={{ width: '100%' }}
+        />
+      </div>
+    );
+  };
+
+  const renderBatchJobDetailPanel = (compact = false) => (
+    <div
+      style={{
+        flex: compact ? 'none' : 2,
+        width: '100%',
+        minWidth: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: compact ? 12 : 16,
+        // 小屏交由外层 Modal 滚动；大屏保持局部布局
+        maxHeight: compact ? 'none' : '72vh',
+        overflowY: compact ? 'visible' : 'hidden',
+      }}
+    >
+      {activeBatchJob ? (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            minWidth: 0,
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography.Title heading={6} style={{ margin: 0 }}>
+              {t('任务 #{{id}}', { id: activeBatchJob.id })}
+            </Typography.Title>
+            <Space wrap>
+              <Button size='small' onClick={() => fetchBatchJobDetail(activeBatchJob.id)} loading={batchJobDetailLoading}>
+                {t('刷新')}
+              </Button>
+              <Button size='small' onClick={() => handleExportBatchJob(activeBatchJob.id)}>
+                {t('导出报告')}
+              </Button>
+            </Space>
+          </div>
+          <Space size='small' wrap>
+            <Typography.Text>{t('状态')}:</Typography.Text>
+            {renderJobStatusTag(activeBatchJob.status)}
+          </Space>
+          <div>
+            <Typography.Text>
+              {t('通道数')}:{' '}
+              <Typography.Text strong>{activeBatchJob.total_channels || 0}</Typography.Text>
+            </Typography.Text>
+            <Typography.Text style={{ marginLeft: 16 }}>
+              {t('模型数')}:{' '}
+              <Typography.Text strong>{activeBatchJob.total_models || 0}</Typography.Text>
+            </Typography.Text>
+          </div>
+          <div>
+            <Typography.Text>
+              {t('进度')}:{' '}
+              <Typography.Text strong>
+                {`${activeBatchJob.completed_count || 0}/${activeBatchJob.total_models || 0}`}
+              </Typography.Text>
+            </Typography.Text>
+            <div
+              style={{
+                height: 6,
+                backgroundColor: 'var(--semi-color-fill-1)',
+                borderRadius: 3,
+                overflow: 'hidden',
+                marginTop: 8,
+              }}
+            >
+              <div
+                style={{
+                  height: '100%',
+                  width:
+                    activeBatchJob.total_models > 0
+                      ? `${Math.min(
+                          100,
+                          ((activeBatchJob.completed_count || 0) /
+                            activeBatchJob.total_models) *
+                            100,
+                        ).toFixed(2)}%`
+                      : '0%',
+                  backgroundColor: 'var(--semi-color-primary)',
+                  transition: 'width 0.3s ease',
+                }}
+              />
+            </div>
+          </div>
+
+          {batchJobDetail?.options && (
+            <div>
+              <Typography.Text strong>{t('任务配置')}</Typography.Text>
+              <div style={{ marginTop: 8, lineHeight: 1.6 }}>
+                <div>
+                  {t('模型范围')}: {batchJobDetail.options.model_scope === 'default' ? t('仅默认测试模型') : t('全部模型')}
+                </div>
+                <div>
+                  {t('测试模式')}: {batchJobDetail.options.test_mode === 'selected' ? t('指定模型测试') : t('全部模型批量测试')}
+                </div>
+                {batchJobDetail.options.test_mode === 'selected' && Array.isArray(batchJobDetail.options.target_models) && (
+                  <div>
+                    {t('指定模型')}: {' '}
+                    {batchJobDetail.options.target_models.length > 0
+                      ? batchJobDetail.options.target_models.join(', ')
+                      : t('无')}
+                  </div>
+                )}
+                <div>
+                  {t('包含禁用渠道')}: {batchJobDetail.options.include_disabled ? t('是') : t('否')}
+                </div>
+                <div>
+                  {t('使用渠道默认模型')}:{' '}
+                  {batchJobDetail.options.use_channel_default ? t('是') : t('否')}
+                </div>
+                {Array.isArray(batchJobDetail.options.channel_ids) && batchJobDetail.options.channel_ids.length > 0 && (
+                  <div>
+                    {t('渠道ID')}:{' '}
+                    {batchJobDetail.options.channel_ids.join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginBottom: 16,
+            flexWrap: 'wrap',
+          }}>
+            <Button
+              size='small'
+              type={showFailedPreview ? 'primary' : 'warning'}
+              onClick={toggleFailedPreview}
+              disabled={!showFailedPreview && failedResultCount === 0}
+            >
+              {showFailedPreview
+                ? t('退出失败预览')
+                : `${t('预览失败模型')} (${failedResultCount})`}
+            </Button>
+            {showFailedPreview && (
+              <Button
+                size='small'
+                onClick={handleRefreshFailedPreview}
+                loading={refreshingFailedPreview}
+              >
+                {refreshingFailedPreview ? t('刷新中...') : t('刷新失败预览')}
+              </Button>
+            )}
+            <Button
+              type='primary'
+              size='small'
+              loading={retryingFailedModels}
+              disabled={
+                retryingFailedModels ||
+                deletingFailedModels ||
+                activeBatchJob.status === 'RUNNING' ||
+                activeBatchJob.status === 'PENDING' ||
+                failedResultCount === 0
+              }
+              onClick={() => handleBatchRetryFailedModels(activeBatchJob.id)}
+            >
+              {t('批量重试失败模型')}
+            </Button>
+            <Button
+              type='danger'
+              size='small'
+              loading={deletingFailedModels}
+              disabled={
+                deletingFailedModels ||
+                retryingFailedModels ||
+                activeBatchJob.status === 'RUNNING' ||
+                activeBatchJob.status === 'PENDING' ||
+                failedResultCount === 0
+              }
+              onClick={() => handleBatchJobDeleteFailedModels(activeBatchJob.id)}
+            >
+              {t('删除失败模型')}
+            </Button>
+            {showFailedPreview && (
+              <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
+                {t('仅展示失败记录，可直接点击列表中的重试按钮进行单条处理。')}
+              </Typography.Text>
+            )}
+          </div>
+
+          {Array.isArray(batchJobDetail?.retrySummary) && batchJobDetail.retrySummary.length > 0 && (
+            <div
+              style={{
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 6,
+                padding: 12,
+                marginBottom: 16,
+                maxHeight: 180,
+                overflowY: 'auto',
+              }}
+            >
+              <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                {t('批量重试摘要（最新一次操作）')}
+              </Typography.Text>
+              {batchJobDetail.retrySummary.map((item, idx) => (
+                <Typography.Text key={idx} style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>
+                  #{item.channel_id} {item.channel_name || ''} — {item.model_name || ''} {item.success ? t('成功') : t('失败')}{item.message ? ` (${item.message})` : ''}
+                </Typography.Text>
+              ))}
+            </div>
+          )}
+
+          {Array.isArray(batchJobDetail?.deleteSummary) && batchJobDetail.deleteSummary.length > 0 && (
+            <div
+              style={{
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 6,
+                padding: 12,
+                marginBottom: 16,
+                maxHeight: 180,
+                overflowY: 'auto',
+              }}
+            >
+              <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                {t('失败模型摘要（最新一次操作）')}
+              </Typography.Text>
+              {batchJobDetail.deleteSummary.map((item, idx) => (
+                <Typography.Text key={idx} style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>
+                  #{item.channel_id} {item.channel_name || ''} — {Array.isArray(item.removed) ? item.removed.join(', ') : '-'}
+                  {item.error ? ` (${item.error})` : ''}
+                </Typography.Text>
+              ))}
+            </div>
+          )}
+
+          <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+            {t('测试结果')}
+          </Typography.Text>
+          <div style={{ flex: 1, minHeight: 200, minWidth: 0, display: 'flex', overflow: compact ? 'visible' : 'hidden' }}>
+            <Table
+              size='small'
+              loading={batchJobResultsLoading || batchJobDetailLoading}
+              columns={jobResultColumns}
+              dataSource={displayedBatchJobResults}
+              pagination={
+                showFailedPreview
+                  ? false
+                  : {
+                      currentPage: batchJobResultsPage,
+                      pageSize: batchJobResultsPageSize,
+                      total: batchJobResultsTotal,
+                      onPageChange: handleBatchJobResultPageChange,
+                      showSizeChanger: false,
+                    }
+              }
+              // 小屏下不设置表格内部纵向滚动，避免与外层 Modal 重叠滚动
+              scroll={compact ? { x: 'max-content' } : { x: 'max-content', y: 420 }}
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 200,
+            color: 'var(--semi-color-text-2)',
+          }}
+        >
+          {t('请选择左侧任务以查看详情')}
+        </div>
+      )}
+    </div>
+  );
+
   const copySelectedChannel = async (record) => {
     const channelToCopy = record;
     channelToCopy.name += t('_复制');
@@ -1284,6 +2486,17 @@ const ChannelsTable = () => {
     }
   };
 
+  useEffect(() => {
+    const handleResize = () => {
+      setIsCompactScreen(getIsCompactScreen());
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  }, []);
+
    useEffect(() => {
     // console.log('default effect')
     const localIdSort = localStorage.getItem('id-sort') === 'true';
@@ -1308,13 +2521,77 @@ const ChannelsTable = () => {
       const cachedResults = getCachedTestResults(currentTestChannel.id);
       if (cachedResults) {
         setBatchTestResults(cachedResults);
-        setTestProgress({ 
-          completed: cachedResults.length, 
-          total: currentTestChannel.models?.split(',').filter(m => m.trim()).length || 0 
+        setTestProgress({
+          completed: cachedResults.length,
+          total:
+            currentTestChannel.models
+              ?.split(',')
+              .filter((m) => m.trim()).length || 0,
         });
       }
     }
   }, [showModelTestModal, currentTestChannel]);
+
+  useEffect(() => {
+    if (!showBatchJobPanel) {
+      return;
+    }
+    fetchBatchJobs(true).then();
+  }, [showBatchJobPanel]);
+
+  useEffect(() => {
+    if (!showBatchJobPanel) {
+      return;
+    }
+    if (!isCompactScreen) {
+      setBatchJobPanelTab('list');
+      return;
+    }
+    setBatchJobPanelTab(activeBatchJob ? 'detail' : 'list');
+  }, [isCompactScreen, activeBatchJob, showBatchJobPanel]);
+
+  useEffect(() => {
+    if (!showBatchTestConfig) {
+      return;
+    }
+    if (batchTestConfigState.testMode !== 'selected') {
+      return;
+    }
+    if (availableModels.length === 0 && !availableModelsLoading) {
+      fetchAvailableModels().then();
+    }
+  }, [
+    showBatchTestConfig,
+    batchTestConfigState.testMode,
+    availableModels.length,
+  ]);
+
+  useEffect(() => {
+    if (showFailedPreview && failedResultCount === 0) {
+      setShowFailedPreview(false);
+      showSuccess(t('失败模型已全部处理，退出预览模式'));
+    }
+  }, [showFailedPreview, failedResultCount]);
+
+  useEffect(() => {
+    if (!showBatchJobPanel || !activeBatchJob) {
+      return;
+    }
+    if (
+      activeBatchJob.status !== 'RUNNING' &&
+      activeBatchJob.status !== 'PENDING'
+    ) {
+      return;
+    }
+    const timer = setInterval(() => {
+      fetchBatchJobDetail(activeBatchJob.id, {
+        silent: true,
+        page: batchJobResultsPage,
+        keepPreview: showFailedPreview,
+      });
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [showBatchJobPanel, activeBatchJob, batchJobResultsPage, showFailedPreview]);
 
   // 加载测试结果缓存
   const loadTestResultsCache = () => {
@@ -2253,7 +3530,7 @@ const ChannelsTable = () => {
   };
 
   return (
-    <>
+    <React.Fragment>
       {renderColumnSelector()}
       <EditTagModal
         visible={showEditTag}
@@ -2641,6 +3918,21 @@ const ChannelsTable = () => {
 
           <Button
             theme='light'
+            type='primary'
+            onClick={openBatchTestConfigModal}
+          >
+            {t('批量模型测试')}
+          </Button>
+
+          <Button
+            theme='light'
+            onClick={handleOpenBatchJobPanel}
+          >
+            {t('查看测试任务')}
+          </Button>
+
+          <Button
+            theme='light'
             type='tertiary'
             icon={<IconSetting />}
             onClick={() => setShowColumnSelector(true)}
@@ -2680,6 +3972,754 @@ const ChannelsTable = () => {
             : null
         }
       />
+      <Modal
+        title={t('批量模型测试配置')}
+        visible={showBatchTestConfig}
+        maskClosable={false}
+        centered={true}
+        onCancel={() => {
+          closeBatchTestConfigModal();
+        }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={resetBatchTestConfig}>{t('重置')}</Button>
+            <Button onClick={() => closeBatchTestConfigModal()}>{t('取消')}</Button>
+            <Button
+              type='primary'
+              loading={startingBatchTest}
+              onClick={startBatchChannelTest}
+            >
+              {startingBatchTest ? t('创建中...') : t('开始测试')}
+            </Button>
+          </div>
+        }
+        style={{ width: isMobile() ? '92%' : 720 }}
+        bodyStyle={{
+          padding: isMobile() ? '16px 12px' : '24px',
+          maxHeight: isMobile() ? '78vh' : '70vh',
+          overflowY: 'auto',
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18, width: '100%' }}>
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
+            <Typography.Text strong>{t('配置模式')}</Typography.Text>
+            <RadioGroup
+              type='button'
+              value={batchTestConfigMode}
+              onChange={(val) => {
+                const value =
+                  typeof val === 'string'
+                    ? val
+                    : val?.target?.value || val?.value || 'quick';
+                setBatchTestConfigMode(value);
+              }}
+              style={{
+                marginTop: 12,
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+              }}
+            >
+              <Radio value='quick' style={{ flex: 1, minWidth: 140 }}>
+                {t('快速模式')}
+              </Radio>
+              <Radio value='advanced' style={{ flex: 1, minWidth: 140 }}>
+                {t('自定义模式')}
+              </Radio>
+            </RadioGroup>
+            <Typography.Text type='tertiary' style={{ marginTop: 12, display: 'block' }}>
+              {isQuickBatchConfig
+                ? t('快速模式仅展示核心参数，适合日常巡检。切换到自定义模式可获得全部高级选项。')
+                : t('自定义模式可灵活配置模型过滤、并发节奏等细节。')}
+            </Typography.Text>
+          </div>
+
+          {isQuickBatchConfig && (
+            <React.Fragment>
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('测试范围')}</Typography.Text>
+                <RadioGroup
+                  value={quickScopeValue}
+                  onChange={(val) => {
+                    const value =
+                      typeof val === 'string'
+                        ? val
+                        : val?.target?.value || val?.value || 'all';
+                    setBatchTestConfigState((prev) => {
+                      const includeDisabled = prev.channelScope === 'allWithDisabled';
+                      if (value === 'selected') {
+                        return {
+                          ...prev,
+                          channelScope: 'selected',
+                        };
+                      }
+                      return {
+                        ...prev,
+                        channelScope: includeDisabled ? 'allWithDisabled' : 'allEnabled',
+                      };
+                    });
+                  }}
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <Radio value='selected' disabled={selectedChannels.length === 0}>
+                    {t('仅测试所选渠道（已选 {{count}} 个）', {
+                      count: selectedChannels.length,
+                    })}
+                  </Radio>
+                  <Radio value='all'>{t('测试全部渠道')}</Radio>
+                </RadioGroup>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Typography.Text type='tertiary'>
+                    {t('包含已禁用渠道')}
+                  </Typography.Text>
+                  <Switch
+                    size='small'
+                    checked={quickIncludeDisabled}
+                    disabled={quickScopeValue === 'selected'}
+                    onChange={(checked) => {
+                      setBatchTestConfigState((prev) => {
+                        if (prev.channelScope === 'selected') {
+                          return prev;
+                        }
+                        return {
+                          ...prev,
+                          channelScope: checked ? 'allWithDisabled' : 'allEnabled',
+                        };
+                      });
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('执行节奏')}</Typography.Text>
+                <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+                  {t('并发度与请求间隔影响整体耗时与上游限流压力。')}
+                </Typography.Text>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: isMobile() ? 'column' : 'row',
+                    gap: 12,
+                    alignItems: isMobile() ? 'stretch' : 'center',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: isMobile() ? '100%' : 220 }}>
+                    <Slider
+                      min={1}
+                      max={10}
+                      step={1}
+                      value={batchTestConfigState.concurrency}
+                      onChange={(value) => {
+                        const raw = Array.isArray(value) ? value[0] : value;
+                        const num = Math.max(1, Math.min(10, Number(raw) || 1));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          concurrency: num,
+                        }));
+                      }}
+                    />
+                  </div>
+                  <InputNumber
+                    min={1}
+                    max={10}
+                    value={batchTestConfigState.concurrency}
+                    onChange={(value) => {
+                      const num = Math.max(1, Math.min(10, Number(value) || 1));
+                      setBatchTestConfigState((prev) => ({
+                        ...prev,
+                        concurrency: num,
+                      }));
+                    }}
+                    style={{ width: isMobile() ? '100%' : 100 }}
+                    size='large'
+                  />
+                </div>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: isMobile() ? 'column' : 'row',
+                    gap: 12,
+                    alignItems: isMobile() ? 'stretch' : 'center',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <Typography.Text type='tertiary'>
+                      {t('请求间隔 (ms)')}
+                    </Typography.Text>
+                    <InputNumber
+                      min={100}
+                      max={5000}
+                      step={50}
+                      value={batchTestConfigState.intervalMs}
+                      onChange={(value) => {
+                        const num = Math.max(100, Math.min(5000, Number(value) || 100));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          intervalMs: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                      size='large'
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <Typography.Text type='tertiary'>
+                      {t('最大重试次数')}
+                    </Typography.Text>
+                    <InputNumber
+                      min={0}
+                      max={5}
+                      value={batchTestConfigState.retryLimit}
+                      onChange={(value) => {
+                        const num = Math.max(0, Math.min(5, Number(value) || 0));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          retryLimit: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                      size='large'
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <Typography.Text type='tertiary' style={{ display: 'block' }}>
+                {t('快速模式默认使用渠道配置的模型列表与默认模型，适合快速巡检任务。')}
+              </Typography.Text>
+            </React.Fragment>
+          )}
+
+          {!isQuickBatchConfig && (
+            <React.Fragment>
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('测试范围')}</Typography.Text>
+                <RadioGroup
+                  value={batchTestConfigState.channelScope}
+                  onChange={(val) => {
+                    const value =
+                      typeof val === 'string'
+                        ? val
+                        : val?.target?.value || val?.value || 'allEnabled';
+                    setBatchTestConfigState((prev) => ({
+                      ...prev,
+                      channelScope: value,
+                    }));
+                  }}
+                  style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}
+                >
+                  <Radio value='selected' disabled={selectedChannels.length === 0}>
+                    {t('仅测试所选渠道（已选 {{count}} 个）', {
+                      count: selectedChannels.length,
+                    })}
+                  </Radio>
+                  <Radio value='allEnabled'>{t('测试全部渠道')}</Radio>
+                  <Radio value='allWithDisabled'>
+                    {t('测试全部渠道')}（{t('包含已禁用渠道')}）
+                  </Radio>
+                </RadioGroup>
+              </div>
+
+          <div
+            style={{
+              padding: '14px 18px',
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
+            <Typography.Text strong>{t('测试模式')}</Typography.Text>
+            <RadioGroup
+              type='button'
+              value={batchTestConfigState.testMode}
+              onChange={(val) => {
+                const value =
+                  typeof val === 'string'
+                    ? val
+                    : val?.target?.value || val?.value || 'all';
+                setBatchTestConfigState((prev) => ({
+                  ...prev,
+                  testMode: value,
+                }));
+              }}
+              style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}
+            >
+              <Radio value='all' style={{ flex: 1, minWidth: 160 }}>
+                {t('全部模型批量测试')}
+              </Radio>
+              <Radio value='selected' style={{ flex: 1, minWidth: 160 }}>
+                {t('指定模型测试')}
+              </Radio>
+            </RadioGroup>
+            <Typography.Text type='tertiary' style={{ marginTop: 12, display: 'block' }}>
+              {t('选择模式决定模型来源，可按需切换。')}
+            </Typography.Text>
+          </div>
+
+          {batchTestConfigState.testMode === 'selected' && (
+            <div
+              style={{
+                padding: '14px 18px',
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 8,
+                background: 'var(--semi-color-fill-0)',
+              }}
+            >
+              <Typography.Text strong>{t('指定模型列表')}</Typography.Text>
+              <div
+                style={{
+                  marginTop: 12,
+                  display: 'flex',
+                  flexDirection: isMobile() ? 'column' : 'row',
+                  gap: 12,
+                  flexWrap: 'wrap',
+                  alignItems: isMobile() ? 'stretch' : 'center',
+                }}
+              >
+                <Input
+                  placeholder={t('搜索模型...')}
+                  value={modelSelectorKeyword}
+                  onChange={(v) => setModelSelectorKeyword(v)}
+                  prefix={<IconSearch />}
+                  showClear
+                  style={{ flex: 1, minWidth: isMobile() ? '100%' : 240 }}
+                />
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    size='small'
+                    theme='light'
+                    onClick={handleSelectAllFilteredModels}
+                    disabled={filteredAvailableModels.length === 0}
+                  >
+                    {t('全选当前筛选')}
+                  </Button>
+                  <Button
+                    size='small'
+                    theme='light'
+                    onClick={handleInvertFilteredModels}
+                    disabled={filteredAvailableModels.length === 0}
+                  >
+                    {t('反选当前筛选')}
+                  </Button>
+                  <Button
+                    size='small'
+                    theme='light'
+                    type='danger'
+                    onClick={handleClearSelectedModels}
+                    disabled={batchTestConfigState.selectedModels.length === 0}
+                  >
+                    {t('清空选择')}
+                  </Button>
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Spin spinning={availableModelsLoading}>
+                  {availableModels.length === 0 && !availableModelsLoading ? (
+                    <Typography.Text type='tertiary'>
+                      {t('尚未获取到可用模型，请稍后再试')}
+                    </Typography.Text>
+                  ) : filteredAvailableModels.length === 0 ? (
+                    <Typography.Text type='tertiary'>
+                      {t('未匹配到符合条件的模型')}
+                    </Typography.Text>
+                  ) : (
+                    <div style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 4 }}>
+                      <CheckboxGroup
+                        value={batchTestConfigState.selectedModels}
+                        onChange={handleModelSelectionChange}
+                      >
+                        {filteredAvailableModels.map((model) => (
+                          <Checkbox
+                            value={model}
+                            key={model}
+                            style={{ display: 'block', marginBottom: 6 }}
+                          >
+                            {model}
+                          </Checkbox>
+                        ))}
+                      </CheckboxGroup>
+                    </div>
+                  )}
+                </Spin>
+              </div>
+              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {batchTestConfigState.selectedModels.length > 0 ? (
+                  batchTestConfigState.selectedModels.map((model) => (
+                    <Tag
+                      key={model}
+                      size='large'
+                      color='blue'
+                      closable
+                      onClose={() =>
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          selectedModels: prev.selectedModels.filter((item) => item !== model),
+                        }))
+                      }
+                    >
+                      {model}
+                    </Tag>
+                  ))
+                ) : (
+                  <Typography.Text type='tertiary'>
+                    {t('尚未选择模型')}
+                  </Typography.Text>
+                )}
+              </div>
+              <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 12 }}>
+                {t('已选择 {{count}} 个模型（共 {{total}} 个可选）', {
+                  count: batchTestConfigState.selectedModels.length,
+                  total: availableModels.length,
+                })}
+              </Typography.Text>
+            </div>
+          )}
+
+          <div
+            style={{
+              padding: '12px 18px',
+              border: '1px dashed var(--semi-color-border)',
+              borderRadius: 8,
+              background: 'var(--semi-color-fill-0)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: isMobile() ? 'flex-start' : 'center',
+              gap: 12,
+              flexWrap: isMobile() ? 'wrap' : 'nowrap',
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Typography.Text strong>{t('高级设置')}</Typography.Text>
+              <Typography.Text type='tertiary'>
+                {t('调整模型过滤、并发等高级参数。')}
+              </Typography.Text>
+            </div>
+            <Button
+              size='small'
+              theme='light'
+              type='tertiary'
+              icon={
+                <IconTreeTriangleDown
+                  style={{
+                    transition: 'transform 0.2s ease',
+                    transform: showAdvancedBatchConfig ? 'rotate(180deg)' : 'rotate(-90deg)',
+                  }}
+                />
+              }
+              onClick={() => setShowAdvancedBatchConfig((prev) => !prev)}
+              style={{ alignSelf: isMobile() ? 'flex-start' : 'center' }}
+            >
+              {showAdvancedBatchConfig ? t('收起') : t('展开')}
+            </Button>
+          </div>
+
+          {showAdvancedBatchConfig && (
+            <React.Fragment>
+              {batchTestConfigState.testMode === 'all' && (
+                <React.Fragment>
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 8,
+                      background: 'var(--semi-color-fill-0)',
+                    }}
+                  >
+                    <Typography.Text strong>{t('模型范围')}</Typography.Text>
+                    <RadioGroup
+                      type='button'
+                      value={batchTestConfigState.modelScope}
+                      onChange={(val) => {
+                        const value =
+                          typeof val === 'string'
+                            ? val
+                            : val?.target?.value || val?.value || 'all';
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          modelScope: value,
+                        }));
+                      }}
+                      style={{ marginTop: 12, display: 'flex', gap: 8 }}
+                    >
+                      <Radio value='all' style={{ flex: 1 }}>
+                        {t('全部模型')}
+                      </Radio>
+                      <Radio value='default' style={{ flex: 1 }}>
+                        {t('仅默认测试模型')}
+                      </Radio>
+                    </RadioGroup>
+                    <Checkbox
+                      style={{ marginTop: 12, display: 'block' }}
+                      checked={batchTestConfigState.useChannelDefault}
+                      onChange={(e) => {
+                        const checked = !!e?.target?.checked;
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          useChannelDefault: checked,
+                        }));
+                      }}
+                    >
+                      {t('优先使用渠道自定义默认模型')}
+                    </Checkbox>
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 8,
+                      background: 'var(--semi-color-fill-0)',
+                    }}
+                  >
+                    <Typography.Text strong>{t('模型白名单')}</Typography.Text>
+                    <textarea
+                      rows={4}
+                      placeholder={t('使用逗号或换行分隔模型名称，可留空')}
+                      value={batchTestConfigState.modelWhitelist}
+                      onChange={(e) =>
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          modelWhitelist: e?.target?.value || '',
+                        }))
+                      }
+                      className='semi-input'
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: 4,
+                        border: '1px solid var(--semi-color-border)',
+                        resize: 'vertical',
+                        minHeight: 96,
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '14px 18px',
+                      border: '1px solid var(--semi-color-border)',
+                      borderRadius: 8,
+                      background: 'var(--semi-color-fill-0)',
+                    }}
+                  >
+                    <Typography.Text strong>{t('模型黑名单')}</Typography.Text>
+                    <textarea
+                      rows={4}
+                      placeholder={t('使用逗号或换行分隔需要跳过的模型，可留空')}
+                      value={batchTestConfigState.modelBlacklist}
+                      onChange={(e) =>
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          modelBlacklist: e?.target?.value || '',
+                        }))
+                      }
+                      className='semi-input'
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        borderRadius: 4,
+                        border: '1px solid var(--semi-color-border)',
+                        resize: 'vertical',
+                        minHeight: 96,
+                      }}
+                    />
+                  </div>
+                </React.Fragment>
+              )}
+
+              <div
+                style={{
+                  padding: '14px 18px',
+                  border: '1px solid var(--semi-color-border)',
+                  borderRadius: 8,
+                  background: 'var(--semi-color-fill-0)',
+                }}
+              >
+                <Typography.Text strong>{t('并发与频率')}</Typography.Text>
+                <div
+                  style={{
+                    marginTop: 12,
+                    display: 'flex',
+                    flexDirection: isMobile() ? 'column' : 'row',
+                    gap: 20,
+                    width: '100%',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
+                    <Typography.Text type='tertiary'>{t('并发数')}</Typography.Text>
+                    <InputNumber
+                      min={1}
+                      max={16}
+                      value={batchTestConfigState.concurrency}
+                      onChange={(value) => {
+                        const num = Math.max(1, Math.min(16, Number(value) || 1));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          concurrency: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 200, flex: isMobile() ? 'none' : '1' }}>
+                    <Typography.Text type='tertiary'>{t('请求间隔(ms)')}</Typography.Text>
+                    <InputNumber
+                      min={100}
+                      max={5000}
+                      step={50}
+                      value={batchTestConfigState.intervalMs}
+                      onChange={(value) => {
+                        const num = Math.max(100, Math.min(5000, Number(value) || 100));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          intervalMs: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 160 }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160, flex: isMobile() ? 'none' : '1' }}>
+                    <Typography.Text type='tertiary'>{t('最大重试次数')}</Typography.Text>
+                    <InputNumber
+                      min={0}
+                      max={5}
+                      value={batchTestConfigState.retryLimit}
+                      onChange={(value) => {
+                        const num = Math.max(0, Math.min(5, Number(value) || 0));
+                        setBatchTestConfigState((prev) => ({
+                          ...prev,
+                          retryLimit: num,
+                        }));
+                      }}
+                      style={{ width: isMobile() ? '100%' : 140 }}
+                    />
+                  </div>
+                </div>
+                <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 12 }}>
+                  {t('建议根据上游限流策略合理配置并发与请求间隔，避免触发风控。')}
+                </Typography.Text>
+              </div>
+            </React.Fragment>
+          )}
+
+          </React.Fragment>
+        )}
+
+          <Typography.Text type='tertiary'>
+            {t('提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。')}
+          </Typography.Text>
+        </div>
+      </Modal>
+      <Modal
+        title={t('批量模型测试任务看板')}
+        visible={showBatchJobPanel}
+        centered={true}
+        maskClosable={false}
+        destroyOnClose
+        onCancel={() => {
+          setShowBatchJobPanel(false);
+          setActiveBatchJob(null);
+          setBatchJobDetail(null);
+          setBatchJobResults([]);
+          setAllFailedBatchJobResults([]);
+          setShowFailedPreview(false);
+          setRefreshingFailedPreview(false);
+          setBatchJobResultsPage(1);
+          setBatchJobResultsTotal(0);
+        }}
+        footer={
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              width: '100%',
+              flexWrap: isCompactScreen ? 'wrap' : 'nowrap',
+              gap: isCompactScreen ? 8 : 16,
+            }}
+          >
+            <Button onClick={() => fetchBatchJobs()} loading={batchJobsLoading}>
+              {t('刷新列表')}
+            </Button>
+            <Button onClick={() => setShowBatchJobPanel(false)}>{t('关闭')}</Button>
+          </div>
+        }
+        style={{ width: isCompactScreen ? '96%' : '92vw', maxWidth: 1120 }}
+        bodyStyle={{ padding: isCompactScreen ? '16px 12px' : '24px', maxHeight: '78vh', overflowY: 'auto', paddingBottom: 12 }}
+      >
+        {isCompactScreen ? (
+          <Tabs
+            type='line'
+            activeKey={batchJobPanelTab}
+            onChange={(key) => setBatchJobPanelTab(key)}
+            tabBarStyle={{ marginBottom: 12 }}
+          >
+            <Tabs.TabPane tab={t('任务列表')} itemKey='list'>
+              {renderBatchJobListPanel(true)}
+            </Tabs.TabPane>
+            <Tabs.TabPane tab={t('任务详情')} itemKey='detail' disabled={!activeBatchJob}>
+              {renderBatchJobDetailPanel(true)}
+            </Tabs.TabPane>
+          </Tabs>
+        ) : (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              gap: 20,
+              alignItems: 'stretch',
+              minWidth: 0,
+            }}
+          >
+            {renderBatchJobListPanel(false)}
+            {renderBatchJobDetailPanel(false)}
+          </div>
+        )}
+      </Modal>
+
       <Modal
         title={t('批量设置标签')}
         visible={showBatchSetTag}
@@ -2851,7 +4891,7 @@ const ChannelsTable = () => {
         footer={null}
         maskClosable={true}
         centered={true}
-        width={800}
+        width={isCompactScreen ? '92%' : 800}
       >
         <div style={{ 
           maxHeight: '70vh', 
@@ -2881,7 +4921,7 @@ const ChannelsTable = () => {
       </Modal>
 
 
-    </>
+    </React.Fragment>
   );
 };
 

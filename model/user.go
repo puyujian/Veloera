@@ -27,50 +27,63 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id               int            `json:"id"`
-	Username         string         `json:"username" gorm:"unique;index" validate:"max=12"`
-	Password         string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	DisplayName      string         `json:"display_name" gorm:"index" validate:"max=20"`
-	Role             int            `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status           int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email            string         `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId         string         `json:"github_id" gorm:"column:github_id;index"`
-	OidcId           string         `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId         string         `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId       string         `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken      *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota            int            `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota        int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount     int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group            string         `json:"group" gorm:"type:varchar(64);default:'default'"`
-	AffCode          string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount         int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota         int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota  int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId        int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt        gorm.DeletedAt `gorm:"index"`
-	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
-	LastCheckInTime  *time.Time     `json:"last_check_in_time" gorm:"column:last_check_in_time"` // 上次签到时间
+	Id                int            `json:"id"`
+	Username          string         `json:"username" gorm:"unique;index" validate:"max=12"`
+	Password          string         `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	DisplayName       string         `json:"display_name" gorm:"index" validate:"max=20"`
+	Role              int            `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status            int            `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email             string         `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId          string         `json:"github_id" gorm:"column:github_id;index"`
+	OidcId            string         `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId          string         `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId        string         `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode  string         `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
+	AccessToken       *string        `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota             int            `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota         int            `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount      int            `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group             string         `json:"group" gorm:"type:varchar(64);default:'default'"`
+	AffCode           string         `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount          int            `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota          int            `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
+	AffHistoryQuota   int            `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	SubscriptionQuota int            `json:"subscription_quota" gorm:"type:int;default:0;column:subscription_quota"`
+	InviterId         int            `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	DeletedAt         gorm.DeletedAt `gorm:"index"`
+	LinuxDOId         string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	IDCFlareId        string         `json:"idc_flare_id" gorm:"column:idc_flare_id;index"`
+	Setting           string         `json:"setting" gorm:"type:text;column:setting"`
+	LastCheckInTime   *time.Time     `json:"last_check_in_time" gorm:"column:last_check_in_time"` // 上次签到时间
 }
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:                user.Id,
+		Group:             user.Group,
+		Quota:             user.Quota,
+		SubscriptionQuota: user.SubscriptionQuota,
+		Status:            user.Status,
+		Username:          user.Username,
+		Setting:           user.Setting,
+		Email:             user.Email,
 	}
 	return cache
+}
+
+type UserQuotaBalance struct {
+	Quota             int
+	SubscriptionQuota int
+}
+
+func (b UserQuotaBalance) Total() int {
+	return b.Quota + b.SubscriptionQuota
 }
 
 func (user *User) GetAccessToken() string {
@@ -687,31 +700,42 @@ func ValidateAccessToken(token string) (user *User) {
 }
 
 // GetUserQuota gets quota from Redis first, falls back to DB if needed
-func GetUserQuota(id int, fromDB bool) (quota int, err error) {
+func GetUserQuotaBalance(id int, fromDB bool) (balance UserQuotaBalance, err error) {
 	defer func() {
-		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) {
 			gopool.Go(func() {
-				if err := updateUserQuotaCache(id, quota); err != nil {
-					common.SysError("failed to update user quota cache: " + err.Error())
+				if cacheErr := updateUserQuotaCache(id, balance.Quota); cacheErr != nil {
+					common.SysError("failed to update user quota cache: " + cacheErr.Error())
+				}
+				if cacheErr := updateUserSubscriptionQuotaCache(id, balance.SubscriptionQuota); cacheErr != nil {
+					common.SysError("failed to update user subscription quota cache: " + cacheErr.Error())
 				}
 			})
 		}
 	}()
 	if !fromDB && common.RedisEnabled {
-		quota, err := getUserQuotaCache(id)
-		if err == nil {
-			return quota, nil
+		if cache, cacheErr := GetUserCache(id); cacheErr == nil {
+			return UserQuotaBalance{Quota: cache.Quota, SubscriptionQuota: cache.SubscriptionQuota}, nil
 		}
-		// Don't return error - fall through to DB
 	}
 	fromDB = true
-	err = DB.Model(&User{}).Where("id = ?", id).Select("quota").Find(&quota).Error
+	var result struct {
+		Quota             int
+		SubscriptionQuota int
+	}
+	err = DB.Model(&User{}).Where("id = ?", id).Select("quota", "subscription_quota").Take(&result).Error
+	if err != nil {
+		return UserQuotaBalance{}, err
+	}
+	return UserQuotaBalance{Quota: result.Quota, SubscriptionQuota: result.SubscriptionQuota}, nil
+}
+
+func GetUserQuota(id int, fromDB bool) (quota int, err error) {
+	balance, err := GetUserQuotaBalance(id, fromDB)
 	if err != nil {
 		return 0, err
 	}
-
-	return quota, nil
+	return balance.Total(), nil
 }
 
 func GetUserUsedQuota(id int) (quota int, err error) {
@@ -857,6 +881,129 @@ func DeltaUpdateUserQuota(id int, delta int) (err error) {
 	}
 }
 
+func ConsumeUserQuota(id int, amount int) (subscriptionUsed int, quotaUsed int, err error) {
+	if amount < 0 {
+		return 0, 0, errors.New("quota 不能为负数！")
+	}
+	if amount == 0 {
+		return 0, 0, nil
+	}
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return 0, 0, tx.Error
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+	var snapshot struct {
+		SubscriptionQuota int
+		Quota             int
+	}
+	err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Model(&User{}).
+		Where("id = ?", id).
+		Select("subscription_quota", "quota").
+		Take(&snapshot).Error
+	if err != nil {
+		return 0, 0, err
+	}
+	total := snapshot.SubscriptionQuota + snapshot.Quota
+	if total < amount {
+		err = fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", common.FormatQuota(total), common.FormatQuota(amount))
+		return 0, 0, err
+	}
+	subscriptionUsed = amount
+	if subscriptionUsed > snapshot.SubscriptionQuota {
+		subscriptionUsed = snapshot.SubscriptionQuota
+	}
+	quotaUsed = amount - subscriptionUsed
+	if subscriptionUsed > 0 {
+		err = tx.Model(&User{}).Where("id = ?", id).
+			Update("subscription_quota", gorm.Expr("subscription_quota - ?", subscriptionUsed)).Error
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	if quotaUsed > 0 {
+		err = tx.Model(&User{}).Where("id = ?", id).
+			Update("quota", gorm.Expr("quota - ?", quotaUsed)).Error
+		if err != nil {
+			return 0, 0, err
+		}
+	}
+	err = tx.Commit().Error
+	if err != nil {
+		return 0, 0, err
+	}
+	if subscriptionUsed > 0 {
+		gopool.Go(func() {
+			if cacheErr := cacheDecrUserSubscriptionQuota(id, int64(subscriptionUsed)); cacheErr != nil {
+				common.SysError("failed to decrease user subscription quota: " + cacheErr.Error())
+			}
+		})
+	}
+	if quotaUsed > 0 {
+		gopool.Go(func() {
+			if cacheErr := cacheDecrUserQuota(id, int64(quotaUsed)); cacheErr != nil {
+				common.SysError("failed to decrease user quota: " + cacheErr.Error())
+			}
+		})
+	}
+	return subscriptionUsed, quotaUsed, nil
+}
+
+func RestoreUserQuota(id int, subscriptionAmount int, quotaAmount int) (err error) {
+	if subscriptionAmount < 0 || quotaAmount < 0 {
+		return errors.New("quota 不能为负数！")
+	}
+	if subscriptionAmount == 0 && quotaAmount == 0 {
+		return nil
+	}
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+	if subscriptionAmount > 0 {
+		err = tx.Model(&User{}).Where("id = ?", id).
+			Update("subscription_quota", gorm.Expr("subscription_quota + ?", subscriptionAmount)).Error
+		if err != nil {
+			return err
+		}
+	}
+	if quotaAmount > 0 {
+		err = tx.Model(&User{}).Where("id = ?", id).
+			Update("quota", gorm.Expr("quota + ?", quotaAmount)).Error
+		if err != nil {
+			return err
+		}
+	}
+	err = tx.Commit().Error
+	if err != nil {
+		return err
+	}
+	if subscriptionAmount > 0 {
+		gopool.Go(func() {
+			if cacheErr := cacheIncrUserSubscriptionQuota(id, int64(subscriptionAmount)); cacheErr != nil {
+				common.SysError("failed to increase user subscription quota: " + cacheErr.Error())
+			}
+		})
+	}
+	if quotaAmount > 0 {
+		gopool.Go(func() {
+			if cacheErr := cacheIncrUserQuota(id, int64(quotaAmount)); cacheErr != nil {
+				common.SysError("failed to increase user quota: " + cacheErr.Error())
+			}
+		})
+	}
+	return nil
+}
+
 //func GetRootUserEmail() (email string) {
 //	DB.Model(&User{}).Where("role = ?", common.RoleRootUser).Select("email").Find(&email)
 //	return email
@@ -938,6 +1085,20 @@ func GetUsernameById(id int, fromDB bool) (username string, err error) {
 	}
 
 	return username, nil
+}
+
+func IsIDCFlareIdAlreadyTaken(idcFlareId string) bool {
+	var user User
+	err := DB.Unscoped().Where("idc_flare_id = ?", idcFlareId).First(&user).Error
+	return !errors.Is(err, gorm.ErrRecordNotFound)
+}
+
+func (user *User) FillUserByIDCFlareId() error {
+	if user.IDCFlareId == "" {
+		return errors.New("idc flare id is empty")
+	}
+	err := DB.Where("idc_flare_id = ?", user.IDCFlareId).First(user).Error
+	return err
 }
 
 func IsLinuxDOIdAlreadyTaken(linuxDOId string) bool {

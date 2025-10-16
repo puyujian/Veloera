@@ -45,6 +45,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/github", middleware.CriticalRateLimit(), controller.GitHubOAuth)
 		apiRouter.GET("/oauth/oidc", middleware.CriticalRateLimit(), controller.OidcAuth)
 		apiRouter.GET("/oauth/linuxdo", middleware.CriticalRateLimit(), controller.LinuxdoOAuth)
+		apiRouter.GET("/oauth/idcflare", middleware.CriticalRateLimit(), controller.IdcflareOAuth)
 		apiRouter.GET("/oauth/state", middleware.CriticalRateLimit(), controller.GenerateOAuthCode)
 		apiRouter.GET("/oauth/wechat", middleware.CriticalRateLimit(), controller.WeChatAuth)
 		apiRouter.GET("/oauth/wechat/bind", middleware.CriticalRateLimit(), controller.WeChatBind)
@@ -111,6 +112,16 @@ func SetApiRouter(router *gin.Engine) {
 			channelRoute.GET("/:id", controller.GetChannel)
 			channelRoute.GET("/test", controller.TestAllChannels)
 			channelRoute.GET("/test/:id", controller.TestChannel)
+			channelRoute.GET("/test/models", controller.GetChannelTestAvailableModels)
+			channelRoute.POST("/test/batch", controller.StartChannelBatchTest)
+			channelRoute.GET("/test/jobs", controller.GetChannelBatchTestJobs)
+			channelRoute.GET("/test/jobs/:id", controller.GetChannelBatchTestJob)
+			channelRoute.GET("/test/jobs/:id/results", controller.GetChannelBatchTestJobResults)
+			channelRoute.POST("/test/jobs/:id/cancel", controller.CancelChannelBatchTestJob)
+			channelRoute.GET("/test/jobs/:id/export", controller.ExportChannelBatchTestJob)
+			channelRoute.POST("/test/jobs/:id/results/:resultId/retry", controller.RetryChannelBatchTestResult)
+			channelRoute.POST("/test/jobs/:id/retry_failed", controller.RetryFailedModelsByJob)
+			channelRoute.POST("/test/jobs/:id/delete_failed", controller.DeleteFailedModelsByJob)
 			channelRoute.GET("/update_balance", controller.UpdateAllChannelsBalance)
 			channelRoute.GET("/update_balance/:id", controller.UpdateChannelBalance)
 			channelRoute.POST("/", controller.AddChannel)
@@ -176,7 +187,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			groupRoute.GET("/", controller.GetGroups)
 		}
-		
+
 		// Model mapping routes
 		modelMappingRoute := apiRouter.Group("/model_mapping")
 		modelMappingRoute.Use(middleware.AdminAuth())

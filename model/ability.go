@@ -19,6 +19,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"veloera/common"
 
@@ -48,6 +49,47 @@ func GetEnabledModels() []string {
 	// Find distinct models
 	DB.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
 	return models
+}
+
+// GetAllChannelModels 返回全部渠道的模型名称，可选是否包含已禁用渠道
+func GetAllChannelModels(includeDisabled bool) ([]string, error) {
+	var rawModels []string
+	query := DB.Table("abilities").Distinct("model")
+	if !includeDisabled {
+		query = query.Where("enabled = ?", true)
+	}
+	if err := query.Pluck("model", &rawModels).Error; err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]struct{}, len(rawModels))
+	cleaned := make([]string, 0, len(rawModels))
+	for _, item := range rawModels {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		cleaned = append(cleaned, trimmed)
+	}
+
+	for _, virtualModel := range GetAllVirtualModels() {
+		trimmed := strings.TrimSpace(virtualModel)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		cleaned = append(cleaned, trimmed)
+	}
+
+	sort.Strings(cleaned)
+	return cleaned, nil
 }
 
 func GetAllEnableAbilities() []Ability {

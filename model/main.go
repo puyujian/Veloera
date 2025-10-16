@@ -269,6 +269,8 @@ func migrateDB() error {
 		&TopUp{},
 		&QuotaData{},
 		&Task{},
+		&ChannelTestJob{},
+		&ChannelTestResult{},
 		&Setup{},
 		&Message{},
 		&UserMessage{},

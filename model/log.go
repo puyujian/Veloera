@@ -353,6 +353,23 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	tx.Scan(&stat)
 	rpmTpmQuery.Scan(&stat)
 
+	// 将总调用数和总token量折算为每分钟指标
+	intervalSeconds := endTimestamp - startTimestamp
+	if startTimestamp > 0 && endTimestamp == 0 {
+		intervalSeconds = common.GetTimestamp() - startTimestamp
+	}
+	if intervalSeconds <= 0 {
+		intervalSeconds = 60
+	}
+	scaleToPerMinute := func(total int) int {
+		if total == 0 {
+			return 0
+		}
+		return int((int64(total)*60 + intervalSeconds/2) / intervalSeconds)
+	}
+	stat.Rpm = scaleToPerMinute(stat.Rpm)
+	stat.Tpm = scaleToPerMinute(stat.Tpm)
+
 	return stat
 }
 
