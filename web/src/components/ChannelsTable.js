@@ -1205,6 +1205,7 @@ const ChannelsTable = () => {
   const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
   const [deletingFailedModels, setDeletingFailedModels] = useState(false);
+  const [retryingFailedModels, setRetryingFailedModels] = useState(false);
   const [showFailedPreview, setShowFailedPreview] = useState(false);
   // 失败预览使用的全量失败结果列表（跨页聚合）
   const [allFailedBatchJobResults, setAllFailedBatchJobResults] = useState([]);
@@ -1742,6 +1743,62 @@ const ChannelsTable = () => {
     }
   };
 
+
+  const handleBatchRetryFailedModels = (jobId) => {
+    if (!jobId) {
+      return;
+    }
+    Modal.confirm({
+      title: t('确认批量重试失败模型'),
+      content: t('此操作将重新测试本次任务中全部失败的模型，操作期间请耐心等待，是否继续？'),
+      okText: t('确认重试'),
+      cancelText: t('取消'),
+      onOk: async () => {
+        setRetryingFailedModels(true);
+        try {
+          const res = await API.post(`/api/channel/test/jobs/${jobId}/retry_failed`);
+          const { success, message, data } = res.data || {};
+          if (success) {
+            const successCount = data?.success_count || 0;
+            const failureCount = data?.failure_count || 0;
+            const summary = Array.isArray(data?.summary) ? data.summary : [];
+            showSuccess(
+              t('批量重试失败模型完成，成功 {{success}} 条，失败 {{failure}} 条', {
+                success: successCount,
+                failure: failureCount,
+              }),
+            );
+            await refresh();
+            await fetchBatchJobDetail(jobId, {
+              silent: true,
+              keepPreview: showFailedPreview,
+              page: batchJobResultsPage,
+            });
+            setBatchJobDetail((prev) => {
+              if (!prev) {
+                return prev;
+              }
+              return {
+                ...prev,
+                retrySummary: summary,
+              };
+            });
+            if (showFailedPreview) {
+              const allFailed = await fetchAllFailedBatchJobResults(jobId);
+              setAllFailedBatchJobResults(allFailed || []);
+            }
+          } else {
+            showError(message || t('批量重试失败模型失败'));
+          }
+        } catch (error) {
+          showError(error?.message || t('批量重试失败模型失败'));
+        } finally {
+          setRetryingFailedModels(false);
+        }
+      },
+    });
+  };
+
   const handleBatchJobDeleteFailedModels = (jobId) => {
     if (!jobId) {
       return;
@@ -2269,10 +2326,27 @@ const ChannelsTable = () => {
               </Button>
             )}
             <Button
+              type='primary'
+              size='small'
+              loading={retryingFailedModels}
+              disabled={
+                retryingFailedModels ||
+                deletingFailedModels ||
+                activeBatchJob.status === 'RUNNING' ||
+                activeBatchJob.status === 'PENDING' ||
+                failedResultCount === 0
+              }
+              onClick={() => handleBatchRetryFailedModels(activeBatchJob.id)}
+            >
+              {t('批量重试失败模型')}
+            </Button>
+            <Button
               type='danger'
               size='small'
               loading={deletingFailedModels}
               disabled={
+                deletingFailedModels ||
+                retryingFailedModels ||
                 activeBatchJob.status === 'RUNNING' ||
                 activeBatchJob.status === 'PENDING' ||
                 failedResultCount === 0
@@ -2287,6 +2361,28 @@ const ChannelsTable = () => {
               </Typography.Text>
             )}
           </div>
+
+          {Array.isArray(batchJobDetail?.retrySummary) && batchJobDetail.retrySummary.length > 0 && (
+            <div
+              style={{
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 6,
+                padding: 12,
+                marginBottom: 16,
+                maxHeight: 180,
+                overflowY: 'auto',
+              }}
+            >
+              <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
+                {t('批量重试摘要（最新一次操作）')}
+              </Typography.Text>
+              {batchJobDetail.retrySummary.map((item, idx) => (
+                <Typography.Text key={idx} style={{ display: 'block', fontSize: 12, marginBottom: 6 }}>
+                  #{item.channel_id} {item.channel_name || ''} — {item.model_name || ''} {item.success ? t('成功') : t('失败')}{item.message ? ` (${item.message})` : ''}
+                </Typography.Text>
+              ))}
+            </div>
+          )}
 
           {Array.isArray(batchJobDetail?.deleteSummary) && batchJobDetail.deleteSummary.length > 0 && (
             <div

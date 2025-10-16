@@ -7,6 +7,7 @@ import (
     "net/http"
     "strconv"
     "strings"
+    "sync"
     "time"
     "veloera/channeltest"
     "veloera/model"
@@ -32,6 +33,11 @@ type batchModelTestRequest struct {
 type batchDeleteFailedRequest struct {
     ChannelIDs []int `json:"channel_ids"`
     DryRun     bool  `json:"dry_run"`
+}
+
+type batchRetryFailedRequest struct {
+    ChannelIDs []int `json:"channel_ids"`
+    Limit      int   `json:"limit"`
 }
 
 func sanitizeStringList(list []string) []string {
@@ -474,6 +480,219 @@ func RetryChannelBatchTestResult(c *gin.Context) {
         "message": responseMessage,
         "data": gin.H{
             "result": refreshed,
+        },
+    })
+}
+
+// RetryFailedModelsByJob 批量重试任务中的失败模型
+func RetryFailedModelsByJob(c *gin.Context) {
+    jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+    if err != nil || jobID <= 0 {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "无效的任务 ID",
+        })
+        return
+    }
+
+    var req batchRetryFailedRequest
+    if c.Request != nil && c.Request.ContentLength != 0 {
+        if err := c.ShouldBindJSON(&req); err != nil {
+            c.JSON(http.StatusOK, gin.H{
+                "success": false,
+                "message": fmt.Sprintf("参数解析失败: %v", err),
+            })
+            return
+        }
+    }
+
+    job, err := model.GetChannelTestJob(jobID)
+    if err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": err.Error(),
+        })
+        return
+    }
+
+    if job.Status == model.ChannelTestJobStatusRunning || job.Status == model.ChannelTestJobStatusPending {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "任务未结束，无法执行批量重试",
+        })
+        return
+    }
+
+    query := model.DB.
+        Where("job_id = ? AND success = ?", jobID, false).
+        Where("(result_status IS NULL OR result_status != ?)", model.ChannelTestResultStatusDeleted)
+    if len(req.ChannelIDs) > 0 {
+        query = query.Where("channel_id IN ?", req.ChannelIDs)
+    }
+    if req.Limit > 0 {
+        query = query.Limit(req.Limit)
+    }
+
+    var failedResults []model.ChannelTestResult
+    if err := query.Order("id asc").Find(&failedResults).Error; err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("查询失败模型列表时出错: %v", err),
+        })
+        return
+    }
+
+    if len(failedResults) == 0 {
+        c.JSON(http.StatusOK, gin.H{
+            "success": true,
+            "message": "未找到需要重试的失败模型",
+            "data": gin.H{
+                "summary":        []any{},
+                "success_count":  0,
+                "failure_count":  0,
+                "total":          0,
+                "updated_results": []any{},
+            },
+        })
+        return
+    }
+
+    workerCount := job.Concurrency
+    if workerCount <= 0 {
+        workerCount = 2
+    }
+    if workerCount > 16 {
+        workerCount = 16
+    }
+    if workerCount > len(failedResults) {
+        workerCount = len(failedResults)
+    }
+    if workerCount <= 0 {
+        workerCount = 1
+    }
+
+    summary := make([]gin.H, 0, len(failedResults))
+    updatedResults := make([]model.ChannelTestResult, 0, len(failedResults))
+    var mu sync.Mutex
+    successCount := 0
+    failureCount := 0
+
+    taskCh := make(chan model.ChannelTestResult)
+    var workerWG sync.WaitGroup
+
+    for i := 0; i < workerCount; i++ {
+        workerWG.Add(1)
+        go func() {
+            defer workerWG.Done()
+            for result := range taskCh {
+                successFlag := false
+                messageText := ""
+                durationMillis := 0
+                updates := map[string]any{
+                    "retry_count": result.RetryCount + 1,
+                    "created_at":  time.Now().Unix(),
+                }
+
+                channel, channelErr := model.GetChannelById(result.ChannelID, true)
+                if channelErr != nil {
+                    messageText = fmt.Sprintf("获取渠道信息失败: %v", channelErr)
+                    updates["success"] = false
+                    updates["result_status"] = model.ChannelTestResultStatusFailed
+                    updates["error_message"] = messageText
+                    updates["duration_millis"] = 0
+                } else {
+                    consumed, execErr, openAIError := channeltest.ExecuteChannelTest(channel, result.ModelName)
+                    durationMillis = int(math.Round(consumed * 1000))
+                    updates["duration_millis"] = durationMillis
+                    if execErr != nil {
+                        updates["success"] = false
+                        updates["result_status"] = model.ChannelTestResultStatusFailed
+                        if openAIError != nil && openAIError.Error.Message != "" {
+                            messageText = fmt.Sprintf("%s (code %v)", openAIError.Error.Message, openAIError.Error.Code)
+                        } else {
+                            messageText = execErr.Error()
+                        }
+                        updates["error_message"] = messageText
+                    } else {
+                        successFlag = true
+                        messageText = "模型重试成功"
+                        updates["success"] = true
+                        updates["result_status"] = model.ChannelTestResultStatusSuccess
+                        updates["error_message"] = ""
+                    }
+                }
+
+                if _, ok := updates["duration_millis"]; !ok {
+                    updates["duration_millis"] = durationMillis
+                }
+                if _, ok := updates["error_message"]; !ok {
+                    updates["error_message"] = messageText
+                }
+                if _, ok := updates["success"]; !ok {
+                    updates["success"] = false
+                }
+                if _, ok := updates["result_status"]; !ok {
+                    updates["result_status"] = model.ChannelTestResultStatusFailed
+                }
+
+                if err := model.UpdateChannelTestResult(result.ID, updates); err != nil {
+                    messageText = fmt.Sprintf("更新结果失败: %v", err)
+                    successFlag = false
+                } else {
+                    if refreshed, err := model.GetChannelTestResult(result.ID); err == nil {
+                        successFlag = refreshed.Success
+                        mu.Lock()
+                        updatedResults = append(updatedResults, *refreshed)
+                        mu.Unlock()
+                    }
+                }
+
+                detail := gin.H{
+                    "result_id":    result.ID,
+                    "channel_id":   result.ChannelID,
+                    "channel_name": result.ChannelName,
+                    "model_name":   result.ModelName,
+                    "success":      successFlag,
+                    "message":      messageText,
+                }
+
+                mu.Lock()
+                summary = append(summary, detail)
+                if successFlag {
+                    successCount++
+                } else {
+                    failureCount++
+                }
+                mu.Unlock()
+            }
+        }()
+    }
+
+    for _, item := range failedResults {
+        taskCh <- item
+    }
+    close(taskCh)
+    workerWG.Wait()
+
+    if err := model.RefreshChannelTestJobStats(jobID); err != nil {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("刷新任务统计失败: %v", err),
+        })
+        return
+    }
+
+    message := fmt.Sprintf("批量重试已完成，成功 %d 条，失败 %d 条", successCount, failureCount)
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": message,
+        "data": gin.H{
+            "summary":         summary,
+            "success_count":   successCount,
+            "failure_count":   failureCount,
+            "total":           len(failedResults),
+            "updated_results": updatedResults,
         },
     })
 }
