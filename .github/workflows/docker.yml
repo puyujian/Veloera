@@ -32,6 +32,11 @@ on:
         default: 'linux/amd64,linux/arm64'
         type: string
 
+# 防止并发构建冲突（workflow 级别，不影响 matrix 并行）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docker-build:
     name: 构建 Docker 镜像
@@ -42,10 +47,6 @@ jobs:
       contents: read
       packages: write
       actions: write
-    # 防止并发构建冲突
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}
-      cancel-in-progress: true
     strategy:
       matrix:
         platform:
