@@ -82,23 +82,16 @@ penAl
 
   const loadAvailableModels = async () => {
     try {
-      const res = await API.get('/api/channel/');
-      const { data } = res.data;
-      const models = new Set();
-
-      if (data && Array.isArray(data)) {
-        data.forEach(channel => {
-          if (channel.status === 1 && channel.models) {
-            channel.models.split(',').forEach(m => {
-              const model = m.trim();
-              if (model) models.add(model);
-            });
-          }
-        });
+      const res = await API.get('/api/user/models');
+      const { success, message, data } = res.data;
+      if (success) {
+        setAvailableModels(data || []);
+      } else {
+        showError(message || '加载模型列表失败');
+        console.error('加载模型列表失败:', message);
       }
-
-      setAvailableModels(Array.from(models).sort());
     } catch (error) {
+      showError('加载模型列表失败: ' + (error.response?.data?.message || error.message));
       console.error('加载模型列表失败:', error);
     }
   };
