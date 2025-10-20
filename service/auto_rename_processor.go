@@ -24,7 +24,6 @@ import (
 	"strings"
 	"veloera/common"
 	"veloera/dto"
-	"veloera/middleware"
 	"veloera/model"
 )
 
@@ -86,8 +85,8 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 // AIRenameProcessor AI调用处理器
 func AIRenameProcessor(models []string, aiModel string, prompt string) (map[string]string, error) {
 	// 1. 构造提示词
-	systemPrompt := "你是一个模型名称规范化助手。请严格按照用户提供的规则处理模型列表，只输出JSON格式的映射结果，不要有任何其他文字。"
-	userPrompt := fmt.Sprintf("%s\n\n输入模型列表：\n%s", prompt, strings.Join(models, "\n"))
+	systemPrompt := "你是一个模型名称规范化助手。请严格按照用户提供的规则处理模型列表,只输出JSON格式的映射结果,不要有任何其他文字。"
+	userPrompt := fmt.Sprintf("%s\n\n输入模型列表:\n%s", prompt, strings.Join(models, "\n"))
 
 	// 2. 查找支持该模型的渠道
 	channels, err := model.GetAllChannels(0, 0, true, false)
@@ -139,34 +138,25 @@ func AIRenameProcessor(models []string, aiModel string, prompt string) (map[stri
 		}, request.Messages...)
 	}
 
-	// 4. 调用AI
-	adaptor := middleware.GetAdaptor(targetChannel.Type)
-	if adaptor == nil {
-		return nil, fmt.Errorf("不支持的渠道类型: %d", targetChannel.Type)
+	// 4. 调用AI - 使用简单的HTTP请求,避免依赖relay包的复杂逻辑
+	baseURL := targetChannel.GetBaseURL()
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
 	}
-
-	// 转换请求
-	convertedRequest, err := adaptor.ConvertRequest(targetChannel, request)
-	if err != nil {
-		return nil, fmt.Errorf("转换请求失败: %w", err)
-	}
-
-	// 获取完整URL
-	fullRequestURL, err := adaptor.GetRequestURL(targetChannel)
-	if err != nil {
-		return nil, fmt.Errorf("获取请求URL失败: %w", err)
-	}
+	fullRequestURL := baseURL + "/v1/chat/completions"
 
 	// 发送请求
 	key := strings.Split(targetChannel.Key, ",")[0]
-	requestBody, err := json.Marshal(convertedRequest)
+	requestBody, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
 	// 使用HTTP客户端调用
-	headers := adaptor.GetRequestHeaders(targetChannel)
-	headers["Authorization"] = fmt.Sprintf("Bearer %s", key)
+	headers := map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": fmt.Sprintf("Bearer %s", key),
+	}
 
 	responseBody, statusCode, err := DoHTTPRequest("POST", fullRequestURL, headers, requestBody)
 	if err != nil {
@@ -189,13 +179,13 @@ func AIRenameProcessor(models []string, aiModel string, prompt string) (map[stri
 
 	content := aiResponse.Choices[0].Message.StringContent()
 
-	// 6. 提取JSON（可能包含在代码块中）
+	// 6. 提取JSON(可能包含在代码块中)
 	jsonContent := extractJSON(content)
 
 	// 7. 解析映射
 	var mapping map[string]string
 	if err := json.Unmarshal([]byte(jsonContent), &mapping); err != nil {
-		return nil, fmt.Errorf("AI返回格式错误，无法解析为JSON映射: %w\n内容: %s", err, jsonContent)
+		return nil, fmt.Errorf("AI返回格式错误,无法解析为JSON映射: %w\n内容: %s", err, jsonContent)
 	}
 
 	return mapping, nil
