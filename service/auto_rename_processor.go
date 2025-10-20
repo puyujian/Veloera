@@ -18,8 +18,11 @@
 package service
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"regexp"
 	"strings"
 	"veloera/common"
@@ -55,8 +58,6 @@ func SystemRenameProcessor(models []string) map[string]string {
 
 // renameModel 重命名单个模型（使用动态厂商规则）
 func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp) string {
-	original := model
-
 	// 1. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
 	model = strings.TrimPrefix(model, "BigModel/")
 	model = strings.TrimSpace(model)
@@ -116,10 +117,11 @@ func AIRenameProcessor(models []string, aiModel string, prompt string) (map[stri
 	}
 
 	// 3. 构造请求
+	userContent, _ := json.Marshal(userPrompt)
 	messages := []dto.Message{
 		{
 			Role:    "user",
-			Content: userPrompt,
+			Content: userContent,
 		},
 	}
 
@@ -130,10 +132,11 @@ func AIRenameProcessor(models []string, aiModel string, prompt string) (map[stri
 	}
 
 	if systemPrompt != "" {
+		systemContent, _ := json.Marshal(systemPrompt)
 		request.Messages = append([]dto.Message{
 			{
 				Role:    "system",
-				Content: systemPrompt,
+				Content: systemContent,
 			},
 		}, request.Messages...)
 	}
@@ -215,8 +218,8 @@ func extractJSON(content string) string {
 
 // DoHTTPRequest 发送HTTP请求（辅助函数）
 func DoHTTPRequest(method, url string, headers map[string]string, body []byte) ([]byte, int, error) {
-	client := GetDefaultHTTPClient()
-	req, err := NewHTTPRequest(method, url, body)
+	client := GetHttpClient()
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -231,7 +234,7 @@ func DoHTTPRequest(method, url string, headers map[string]string, body []byte) (
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := ReadResponseBody(resp)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
