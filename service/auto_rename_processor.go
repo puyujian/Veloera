@@ -58,29 +58,42 @@ func SystemRenameProcessor(models []string) map[string]string {
 
 // renameModel 重命名单个模型（使用动态厂商规则）
 func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp) string {
-	// 1. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
-	model = strings.TrimPrefix(model, "BigModel/")
 	model = strings.TrimSpace(model)
 
-	// 2. 移除日期后缀
-	model = dateSuffixRe.ReplaceAllString(model, "")
+	// 1. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
+	model = strings.TrimPrefix(model, "BigModel/")
 
-	// 3. 识别厂商（使用动态规则）
+	// 2. 如果已经包含 '/'，提取真实模型名（假设格式为 厂商/模型名）
+	//    这样可以确保 deepseek-ai/DeepSeek-V2.5 和 DeepSeek-V2.5 统一为相同名称
+	actualModel := model
+	if idx := strings.Index(model, "/"); idx >= 0 {
+		actualModel = model[idx+1:] // 取 / 后面的部分作为真实模型名
+	}
+
+	// 3. 移除冒号后缀（如 :free、:extended 等）
+	if idx := strings.Index(actualModel, ":"); idx >= 0 {
+		actualModel = actualModel[:idx]
+	}
+
+	// 4. 移除日期后缀
+	actualModel = dateSuffixRe.ReplaceAllString(actualModel, "")
+
+	// 5. 识别厂商（使用动态规则）
 	vendor := ""
 	for _, rule := range vendorRules {
-		if rule.Pattern.MatchString(model) {
+		if rule.Pattern.MatchString(actualModel) {
 			vendor = rule.DisplayName
 			break
 		}
 	}
 
-	// 4. 组合最终名称
+	// 6. 组合最终名称
 	if vendor != "" {
-		return vendor + "/" + model
+		return vendor + "/" + actualModel
 	}
 
 	// 如果没有识别到厂商，返回清理后的名称
-	return model
+	return actualModel
 }
 
 // AIRenameProcessor AI调用处理器
