@@ -31,7 +31,7 @@ import (
 )
 
 // SystemRenameProcessor 系统规则处理器（使用动态厂商规则）
-func SystemRenameProcessor(models []string) map[string]string {
+func SystemRenameProcessor(models []string, includeVendor bool) map[string]string {
 	result := make(map[string]string)
 
 	// 获取动态厂商规则
@@ -47,7 +47,7 @@ func SystemRenameProcessor(models []string) map[string]string {
 			continue
 		}
 
-		renamed := renameModel(model, vendorRules, dateSuffixRe)
+		renamed := renameModel(model, vendorRules, dateSuffixRe, includeVendor)
 		if renamed != model {
 			result[renamed] = model
 		}
@@ -57,7 +57,7 @@ func SystemRenameProcessor(models []string) map[string]string {
 }
 
 // renameModel 重命名单个模型（使用动态厂商规则）
-func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp) string {
+func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp, includeVendor bool) string {
 	model = strings.TrimSpace(model)
 
 	// 1. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
@@ -88,11 +88,11 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 	}
 
 	// 6. 组合最终名称
-	if vendor != "" {
+	if includeVendor && vendor != "" {
 		return vendor + "/" + actualModel
 	}
 
-	// 如果没有识别到厂商，返回清理后的名称
+	// 不包含厂商或未识别到厂商，返回清理后的名称
 	return actualModel
 }
 

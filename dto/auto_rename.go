@@ -21,11 +21,12 @@ import "time"
 
 // GenerateRenameRequest 生成重命名映射请求
 type GenerateRenameRequest struct {
-	Mode        string `json:"mode" binding:"required,oneof=system ai"`
-	AIModel     string `json:"ai_model"`
-	Prompt      string `json:"prompt"`
-	ChannelIDs  []int  `json:"channel_ids"`
-	EnabledOnly bool   `json:"enabled_only"`
+	Mode          string `json:"mode" binding:"required,oneof=system ai"`
+	AIModel       string `json:"ai_model"`
+	Prompt        string `json:"prompt"`
+	ChannelIDs    []int  `json:"channel_ids"`
+	EnabledOnly   bool   `json:"enabled_only"`
+	IncludeVendor bool   `json:"include_vendor"` // 系统模式下是否包含厂商前缀
 }
 
 // ChannelRenamePreview 单个渠道的重命名预览

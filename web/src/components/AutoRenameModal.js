@@ -68,6 +68,7 @@ penAl
 
 以对象形式输出，每个条目为 "重定向名称": "原来名称"`,
     enabledOnly: true,
+    includeVendor: true,
   });
   const [previewData, setPreviewData] = useState(null);
   const [applyMode, setApplyMode] = useState('append');
@@ -122,6 +123,8 @@ penAl
       if (config.mode === 'ai') {
         payload.ai_model = config.aiModel;
         payload.prompt = config.prompt;
+      } else if (config.mode === 'system') {
+        payload.include_vendor = config.includeVendor;
       }
 
       const res = await API.post('/api/channel/auto-rename/generate', payload);
@@ -186,6 +189,17 @@ penAl
         <Radio value="system">系统处理</Radio>
         <Radio value="ai">AI处理</Radio>
       </RadioGroup>
+
+      {config.mode === 'system' && (
+        <div style={{ marginTop: 20 }}>
+          <Checkbox
+            checked={config.includeVendor}
+            onChange={(e) => setConfig({ ...config, includeVendor: e.target.checked })}
+          >
+            包含厂商前缀（如 Anthropic/claude-3-5-sonnet）
+          </Checkbox>
+        </div>
+      )}
 
       {config.mode === 'ai' && (
         <div style={{ marginTop: 20 }}>
