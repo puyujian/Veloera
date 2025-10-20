@@ -56,18 +56,21 @@ func SystemRenameProcessor(models []string, includeVendor bool) map[string]strin
 	return result
 }
 
-// renameModel 重命名单个模型（使用动态厂商规则）
+// renameModel 重命名单个模型（使用动态厂商规则和标准化名称）
 func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp, includeVendor bool) string {
 	model = strings.TrimSpace(model)
 
 	// 1. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
 	model = strings.TrimPrefix(model, "BigModel/")
 
-	// 2. 如果已经包含 '/'，提取真实模型名（假设格式为 厂商/模型名）
-	//    这样可以确保 deepseek-ai/DeepSeek-V2.5 和 DeepSeek-V2.5 统一为相同名称
+	// 2. 如果已经包含 '/'，提取真实模型名（取最后一个斜杠后的部分）
+	//    这样可以确保以下情况统一：
+	//    - Pro/BAAI/bge-m3 → bge-m3
+	//    - BAAI/bge-m3 → bge-m3
+	//    - deepseek-ai/DeepSeek-V2.5 → DeepSeek-V2.5
 	actualModel := model
-	if idx := strings.Index(model, "/"); idx >= 0 {
-		actualModel = model[idx+1:] // 取 / 后面的部分作为真实模型名
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		actualModel = model[idx+1:] // 取最后一个 / 后面的部分作为真实模型名
 	}
 
 	// 3. 移除冒号后缀（如 :free、:extended 等）
@@ -78,7 +81,19 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 	// 4. 移除日期后缀
 	actualModel = dateSuffixRe.ReplaceAllString(actualModel, "")
 
-	// 5. 识别厂商（使用动态规则）
+	// 5. 尝试在元数据中查找标准化名称
+	vendorManager := GetVendorRuleManager()
+	standardName, vendorName, found := vendorManager.FindStandardModelName(actualModel)
+
+	if found {
+		// 找到标准化名称，使用标准名称
+		if includeVendor && vendorName != "" {
+			return vendorName + "/" + standardName
+		}
+		return standardName
+	}
+
+	// 6. 未找到标准化名称，使用传统逻辑识别厂商
 	vendor := ""
 	for _, rule := range vendorRules {
 		if rule.Pattern.MatchString(actualModel) {
@@ -87,7 +102,7 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 		}
 	}
 
-	// 6. 组合最终名称
+	// 7. 组合最终名称
 	if includeVendor && vendor != "" {
 		return vendor + "/" + actualModel
 	}
