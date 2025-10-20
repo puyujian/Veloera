@@ -60,40 +60,69 @@ func SystemRenameProcessor(models []string, includeVendor bool) map[string]strin
 func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp, includeVendor bool) string {
 	model = strings.TrimSpace(model)
 
-	// 1. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
-	model = strings.TrimPrefix(model, "BigModel/")
-
-	// 2. 如果已经包含 '/'，提取真实模型名（取最后一个斜杠后的部分）
-	//    这样可以确保以下情况统一：
-	//    - Pro/BAAI/bge-m3 → bge-m3
-	//    - BAAI/bge-m3 → bge-m3
-	//    - deepseek-ai/DeepSeek-V2.5 → DeepSeek-V2.5
-	actualModel := model
-	if idx := strings.LastIndex(model, "/"); idx >= 0 {
-		actualModel = model[idx+1:] // 取最后一个 / 后面的部分作为真实模型名
+	// 1. 检查是否已经是标准 owner/model 格式
+	//    如果是标准格式（只包含一个 '/' 且两部分都不为空，且不含 ':' 后缀），则直接返回，不进行重命名
+	if slashCount := strings.Count(model, "/"); slashCount == 1 && !strings.Contains(model, ":") {
+		parts := strings.Split(model, "/")
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+			// 排除特殊前缀情况（如 BigModel/ 开头）
+			if parts[0] != "BigModel" && !strings.HasPrefix(model, "Pro/") {
+				// 已经是标准格式，直接返回
+				return model
+			}
+		}
 	}
 
-	// 3. 移除冒号后缀（如 :free、:extended 等）
+	// 2. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
+	model = strings.TrimPrefix(model, "BigModel/")
+
+	// 3. 提取真实模型名（去除 owner/ 前缀）
+	//    对于包含 '/' 的非标准格式模型名，提取最后一个 '/' 后面的部分
+	//    例如：deepseek/deepseek-r1-0528-qwen3-8b:free → deepseek-r1-0528-qwen3-8b:free
+	actualModel := model
+	if strings.Contains(model, "/") {
+		if idx := strings.LastIndex(model, "/"); idx >= 0 {
+			actualModel = model[idx+1:] // 取最后一个 / 后面的部分作为真实模型名
+		}
+	}
+
+	// 4. 移除冒号后缀（如 :free、:extended 等）
 	if idx := strings.Index(actualModel, ":"); idx >= 0 {
 		actualModel = actualModel[:idx]
 	}
 
-	// 4. 移除日期后缀
+	// 5. 移除日期后缀
 	actualModel = dateSuffixRe.ReplaceAllString(actualModel, "")
 
-	// 5. 尝试在元数据中查找标准化名称
+	// 6. 尝试在元数据中查找标准化名称
 	vendorManager := GetVendorRuleManager()
 	standardName, vendorName, found := vendorManager.FindStandardModelName(actualModel)
 
 	if found {
 		// 找到标准化名称，使用标准名称
-		if includeVendor && vendorName != "" {
-			return vendorName + "/" + standardName
+		// 如果标准名称本身包含 '/'（如 deepseek-ai/DeepSeek-V3.1），需要根据 includeVendor 决定是否保留厂商部分
+		if strings.Contains(standardName, "/") {
+			// 标准名称本身就包含厂商前缀
+			if includeVendor {
+				// 需要厂商前缀，直接返回标准名称
+				return standardName
+			} else {
+				// 不需要厂商前缀，只取模型名部分（最后一个 / 后面的部分）
+				if idx := strings.LastIndex(standardName, "/"); idx >= 0 {
+					return standardName[idx+1:]
+				}
+				return standardName
+			}
+		} else {
+			// 标准名称不包含厂商前缀
+			if includeVendor && vendorName != "" {
+				return vendorName + "/" + standardName
+			}
+			return standardName
 		}
-		return standardName
 	}
 
-	// 6. 未找到标准化名称，使用传统逻辑识别厂商
+	// 7. 未找到标准化名称，使用传统逻辑识别厂商
 	vendor := ""
 	for _, rule := range vendorRules {
 		if rule.Pattern.MatchString(actualModel) {
@@ -102,7 +131,7 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 		}
 	}
 
-	// 7. 组合最终名称
+	// 8. 组合最终名称
 	if includeVendor && vendor != "" {
 		return vendor + "/" + actualModel
 	}

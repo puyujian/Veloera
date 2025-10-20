@@ -33,6 +33,9 @@ import {
   Table,
   Tag,
   Divider,
+  Tabs,
+  TabPane,
+  Popconfirm,
 } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess, showWarning } from '../helpers';
 
@@ -73,6 +76,9 @@ penAl
   const [previewData, setPreviewData] = useState(null);
   const [applyMode, setApplyMode] = useState('append');
   const [availableModels, setAvailableModels] = useState([]);
+  const [activeTab, setActiveTab] = useState('new');
+  const [snapshots, setSnapshots] = useState([]);
+  const [loadingSnapshots, setLoadingSnapshots] = useState(false);
 
   // 加载可用的AI模型列表
   useEffect(() => {
@@ -80,6 +86,13 @@ penAl
       loadAvailableModels();
     }
   }, [visible, config.mode]);
+
+  // 加载历史快照
+  useEffect(() => {
+    if (visible && activeTab === 'history') {
+      loadSnapshots();
+    }
+  }, [visible, activeTab]);
 
   const loadAvailableModels = async () => {
     try {
@@ -94,6 +107,45 @@ penAl
     } catch (error) {
       showError('加载模型列表失败: ' + (error.response?.data?.message || error.message));
       console.error('加载模型列表失败:', error);
+    }
+  };
+
+  const loadSnapshots = async () => {
+    setLoadingSnapshots(true);
+    try {
+      const res = await API.get('/api/channel/auto-rename/snapshots');
+      const { success, message, data } = res.data;
+      if (success) {
+        setSnapshots(data || []);
+      } else {
+        showError(message || '加载快照列表失败');
+      }
+    } catch (error) {
+      showError('加载快照列表失败: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoadingSnapshots(false);
+    }
+  };
+
+  const handleUndo = async (sessionId) => {
+    setLoadingSnapshots(true);
+    try {
+      const res = await API.post('/api/channel/auto-rename/undo', {
+        session_id: sessionId,
+      });
+
+      if (res.data.success) {
+        const result = res.data.data;
+        showSuccess(`撤销成功！成功 ${result.success} 个，失败 ${result.failed} 个`);
+        loadSnapshots();
+        if (onSuccess) onSuccess();
+      } else {
+        showError(res.data.message || '撤销失败');
+      }
+    } catch (error) {
+      showError('撤销失败: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setLoadingSnapshots(false);
     }
   };
 
@@ -175,6 +227,7 @@ penAl
     setStep(1);
     setPreviewData(null);
     setApplyMode('append');
+    setActiveTab('new');
     onClose();
   };
 
@@ -346,12 +399,94 @@ penAl
         description="重命名已成功应用！"
       />
       <div style={{ marginTop: 20 }}>
-        <Text>如需撤销，请前往"历史快照"页面</Text>
+        <Text>如需撤销，请切换到"历史记录"标签页</Text>
       </div>
     </div>
   );
 
+  const renderHistory = () => {
+    const columns = [
+      {
+        title: '创建时间',
+        dataIndex: 'created_at',
+        render: (text) => new Date(text).toLocaleString('zh-CN'),
+        width: 180,
+      },
+      {
+        title: '描述',
+        dataIndex: 'description',
+        render: (text) => text || '批量重命名',
+      },
+      {
+        title: '影响渠道',
+        dataIndex: 'channels',
+        render: (channels) => Object.keys(channels || {}).length + ' 个',
+        width: 100,
+      },
+      {
+        title: '会话ID',
+        dataIndex: 'session_id',
+        render: (text) => (
+          <Text
+            type="tertiary"
+            size="small"
+            style={{ fontFamily: 'monospace', fontSize: 11 }}
+          >
+            {text}
+          </Text>
+        ),
+      },
+      {
+        title: '操作',
+        dataIndex: 'session_id',
+        render: (sessionId) => (
+          <Popconfirm
+            title="确认撤销"
+            content="此操作将恢复这次重命名前的配置，是否继续？"
+            onConfirm={() => handleUndo(sessionId)}
+          >
+            <Button type="danger" size="small">
+              撤销
+            </Button>
+          </Popconfirm>
+        ),
+        width: 100,
+      },
+    ];
+
+    return (
+      <div style={{ padding: '20px 0' }}>
+        <Banner
+          type="info"
+          description="这里显示所有批量重命名的历史记录，您可以撤销任意一次操作"
+          style={{ marginBottom: 20 }}
+        />
+        <Table
+          dataSource={snapshots}
+          columns={columns}
+          pagination={{ pageSize: 10 }}
+          loading={loadingSnapshots}
+          empty={
+            <div style={{ padding: '40px 0', textAlign: 'center' }}>
+              <Text type="tertiary">暂无历史记录</Text>
+            </div>
+          }
+        />
+      </div>
+    );
+  };
+
   const getFooter = () => {
+    if (activeTab === 'history') {
+      return (
+        <div>
+          <Button type="primary" onClick={handleClose}>
+            关闭
+          </Button>
+        </div>
+      );
+    }
+
     if (step === 1) {
       return (
         <div>
@@ -400,11 +535,22 @@ penAl
       width={800}
       bodyStyle={{ maxHeight: 600, overflow: 'auto' }}
     >
-      <Spin spinning={loading}>
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
-      </Spin>
+      <Tabs
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key)}
+        type="line"
+      >
+        <TabPane tab="新建重命名" itemKey="new">
+          <Spin spinning={loading}>
+            {step === 1 && renderStep1()}
+            {step === 2 && renderStep2()}
+            {step === 3 && renderStep3()}
+          </Spin>
+        </TabPane>
+        <TabPane tab="历史记录" itemKey="history">
+          {renderHistory()}
+        </TabPane>
+      </Tabs>
     </Modal>
   );
 };

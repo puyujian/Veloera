@@ -279,14 +279,18 @@ func (m *VendorRuleManager) FindStandardModelName(cleanedModelName string) (stri
 	// 不应该将一个版本重命名为另一个版本
 
 	// 策略3: 模糊匹配（处理别名情况，如 claude-haiku-4-5 → claude-3.5-haiku）
-	// 提取关键词进行匹配
-	for _, metadata := range m.modelMetadata {
-		if m.isFuzzyMatch(cleanedModelName, strings.ToLower(metadata.ID)) {
-			vendorName := providerDisplayNames[metadata.ProviderID]
-			if vendorName == "" {
-				vendorName = capitalizeFirst(metadata.ProviderID)
+	// 但如果输入已包含日期后缀（如 claude-3-haiku-20240307），则不进行模糊匹配
+	// 因为这表示用户指定了特定的模型版本，不应该被重命名为其他版本
+	if !dateSuffixRe.MatchString(cleanedModelName) {
+		// 提取关键词进行匹配
+		for _, metadata := range m.modelMetadata {
+			if m.isFuzzyMatch(cleanedModelName, strings.ToLower(metadata.ID)) {
+				vendorName := providerDisplayNames[metadata.ProviderID]
+				if vendorName == "" {
+					vendorName = capitalizeFirst(metadata.ProviderID)
+				}
+				return metadata.ID, vendorName, true
 			}
-			return metadata.ID, vendorName, true
 		}
 	}
 
@@ -311,24 +315,42 @@ func (m *VendorRuleManager) isFuzzyMatch(input, standard string) bool {
 			return false
 		}
 
-		// 检查关键词重叠度
+		// 提取输入和标准的关键词（非版本号）
 		inputKeywords := make(map[string]bool)
 		for _, part := range inputParts {
-			// 过滤掉纯数字版本号，保留语义关键词
 			if !isVersionNumber(part) {
 				inputKeywords[part] = true
 			}
 		}
 
-		matchCount := 0
+		standardKeywords := make(map[string]bool)
 		for _, part := range standardParts {
-			if !isVersionNumber(part) && inputKeywords[part] {
+			if !isVersionNumber(part) {
+				standardKeywords[part] = true
+			}
+		}
+
+		// 双向检查：
+		// 1. 标准名的关键词应该在输入中 (原有逻辑)
+		// 2. 输入的关键词也应该在标准名中 (新增，防止 thinkg 等重要后缀被忽略)
+		matchCount := 0
+		for keyword := range standardKeywords {
+			if inputKeywords[keyword] {
 				matchCount++
 			}
 		}
 
-		// 如果关键词重叠度超过一定阈值，认为匹配
-		// 例如 claude-haiku-4-5 和 claude-3.5-haiku 都包含 claude 和 haiku
+		// 检查输入是否有标准名没有的额外关键词
+		// 如 DeepSeek-V3.1-thinkg 的 "thinkg" 不在 DeepSeek-V3.1 中
+		for keyword := range inputKeywords {
+			if !standardKeywords[keyword] {
+				// 输入有额外的关键词，说明是不同的模型变体
+				return false
+			}
+		}
+
+		// 如果关键词完全匹配且数量>=2，认为是同一个模型
+		// 例如 claude-haiku 和 claude-3.5-haiku 都包含 claude 和 haiku
 		return matchCount >= 2
 	}
 

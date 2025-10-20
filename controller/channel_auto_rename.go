@@ -310,6 +310,29 @@ func ApplyAutoRename(c *gin.Context) {
 				return
 			}
 
+			// 构建反向映射：原始名 -> 重命名名
+			reverseMapping := make(map[string]string)
+			for newName, origName := range finalMapping {
+				reverseMapping[strings.TrimSpace(origName)] = strings.TrimSpace(newName)
+			}
+
+			// 更新 Models 字段：将原始模型名替换为重命名后的名称
+			originalModels := ch.GetModels()
+			newModels := make([]string, 0, len(originalModels))
+			for _, origModel := range originalModels {
+				origModel = strings.TrimSpace(origModel)
+				if origModel == "" {
+					continue
+				}
+				// 如果有重命名，使用重命名后的名称；否则保持原样
+				if renamedModel, exists := reverseMapping[origModel]; exists {
+					newModels = append(newModels, renamedModel)
+				} else {
+					newModels = append(newModels, origModel)
+				}
+			}
+			ch.Models = strings.Join(newModels, ",")
+
 			// 更新渠道
 			finalMappingStr := string(finalMappingJSON)
 			ch.ModelMapping = &finalMappingStr
@@ -397,7 +420,38 @@ func UndoAutoRename(c *gin.Context) {
 
 			result.ChannelName = ch.Name
 
-			// 恢复旧映射
+			// 撤销重命名：需要同时恢复 Models 和 ModelMapping
+			// 1. 根据当前的 ModelMapping，将 Models 中的重命名名称反向映射回原始名称
+			if ch.ModelMapping != nil && *ch.ModelMapping != "" && *ch.ModelMapping != "{}" {
+				var currentMapping map[string]string
+				if err := json.Unmarshal([]byte(*ch.ModelMapping), &currentMapping); err == nil {
+					// 当前 Models 可能是重命名后的名称，需要映射回原始名称
+					currentModels := ch.GetModels()
+					restoredModels := make([]string, 0, len(currentModels))
+
+					for _, currentModel := range currentModels {
+						currentModel = strings.TrimSpace(currentModel)
+						if currentModel == "" {
+							continue
+						}
+
+						// 检查是否是重命名后的名称，如果是则映射回原始名称
+						originalModel := currentModel
+						for renamedName, origName := range currentMapping {
+							if strings.TrimSpace(renamedName) == currentModel {
+								originalModel = strings.TrimSpace(origName)
+								break
+							}
+						}
+						restoredModels = append(restoredModels, originalModel)
+					}
+
+					// 更新 Models 字段为原始名称
+					ch.Models = strings.Join(restoredModels, ",")
+				}
+			}
+
+			// 2. 恢复旧的 ModelMapping
 			ch.ModelMapping = &oldMapping
 			if err := ch.Update(); err != nil {
 				result.Error = "更新渠道失败: " + err.Error()
