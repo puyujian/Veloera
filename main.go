@@ -102,6 +102,11 @@ func main() {
 		common.SysError("failed to initialize model mapping service: " + err.Error())
 	}
 
+	// Initialize vendor rules for auto-rename
+	if err := service.InitVendorRules(); err != nil {
+		common.SysError("failed to initialize vendor rules, using default rules: " + err.Error())
+	}
+
 	if common.RedisEnabled {
 		// for compatibility with old versions
 		common.MemoryCacheEnabled = true

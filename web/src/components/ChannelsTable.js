@@ -77,6 +77,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { loadChannelModels } from './utils.js';
 import EditTagModal from '../pages/Channel/EditTagModal.js';
+import AutoRenameModal from './AutoRenameModal.js';
 import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
@@ -1120,6 +1121,8 @@ const ChannelsTable = () => {
   const [applying, setApplying] = useState(false);
   const [syncEnabledOnly, setSyncEnabledOnly] = useState(false);
   const [syncSelectedOnly, setSyncSelectedOnly] = useState(false);
+  // 自动重命名弹窗
+  const [showAutoRenameModal, setShowAutoRenameModal] = useState(false);
   const [syncConcurrency, setSyncConcurrency] = useState(8);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
@@ -3544,6 +3547,15 @@ const ChannelsTable = () => {
         handleClose={closeEdit}
         editingChannel={editingChannel}
       />
+      <AutoRenameModal
+        visible={showAutoRenameModal}
+        onClose={() => setShowAutoRenameModal(false)}
+        selectedChannelIds={selectedKeys.length > 0 ? selectedKeys : null}
+        onSuccess={() => {
+          setShowAutoRenameModal(false);
+          refresh();
+        }}
+      />
       <Form
         onSubmit={() => {
           searchChannels(
@@ -3796,6 +3808,16 @@ const ChannelsTable = () => {
                       onClick={() => setShowSyncModelsModal(true)}
                     >
                       {t('批量模型同步')}
+                    </Button>
+                  </Dropdown.Item>
+                  <Dropdown.Item>
+                    <Button
+                      theme='light'
+                      type='tertiary'
+                      style={{ width: '100%' }}
+                      onClick={() => setShowAutoRenameModal(true)}
+                    >
+                      {t('自动重命名')}
                     </Button>
                   </Dropdown.Item>
                 </Dropdown.Menu>
