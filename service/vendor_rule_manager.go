@@ -274,18 +274,9 @@ func (m *VendorRuleManager) FindStandardModelName(cleanedModelName string) (stri
 		}
 	}
 
-	// 策略2: 去除日期后缀后匹配
-	cleanedWithoutDate := dateSuffixRe.ReplaceAllString(cleanedModelName, "")
-	for _, metadata := range m.modelMetadata {
-		metadataIDWithoutDate := dateSuffixRe.ReplaceAllString(strings.ToLower(metadata.ID), "")
-		if metadataIDWithoutDate == cleanedWithoutDate {
-			vendorName := providerDisplayNames[metadata.ProviderID]
-			if vendorName == "" {
-				vendorName = capitalizeFirst(metadata.ProviderID)
-			}
-			return metadata.ID, vendorName, true
-		}
-	}
+	// 策略2: 移除 - 不再去除日期后缀进行匹配
+	// 原因: claude-3-5-sonnet-20240620 和 claude-3-5-sonnet-20241022 是不同的模型版本
+	// 不应该将一个版本重命名为另一个版本
 
 	// 策略3: 模糊匹配（处理别名情况，如 claude-haiku-4-5 → claude-3.5-haiku）
 	// 提取关键词进行匹配
