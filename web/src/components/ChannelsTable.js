@@ -3550,7 +3550,7 @@ const ChannelsTable = () => {
       <AutoRenameModal
         visible={showAutoRenameModal}
         onClose={() => setShowAutoRenameModal(false)}
-        selectedChannelIds={selectedKeys.length > 0 ? selectedKeys : null}
+        selectedChannelIds={selectedChannels.length > 0 ? selectedChannels.map(c => c.id) : null}
         onSuccess={() => {
           setShowAutoRenameModal(false);
           refresh();
