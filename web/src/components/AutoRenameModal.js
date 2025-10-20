@@ -79,6 +79,7 @@ penAl
   const [activeTab, setActiveTab] = useState('new');
   const [snapshots, setSnapshots] = useState([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
+  const [applyResult, setApplyResult] = useState(null);
 
   // 加载可用的AI模型列表
   useEffect(() => {
@@ -210,6 +211,7 @@ penAl
 
       if (res.data.success) {
         const result = res.data.data;
+        setApplyResult(result);
         showSuccess(`应用成功！成功 ${result.success} 个，失败 ${result.failed} 个`);
         setStep(3);
         if (onSuccess) onSuccess();
@@ -228,6 +230,7 @@ penAl
     setPreviewData(null);
     setApplyMode('append');
     setActiveTab('new');
+    setApplyResult(null);
     onClose();
   };
 
@@ -392,17 +395,119 @@ penAl
     );
   };
 
-  const renderStep3 = () => (
-    <div style={{ padding: '20px 0', textAlign: 'center' }}>
-      <Banner
-        type="success"
-        description="重命名已成功应用！"
-      />
-      <div style={{ marginTop: 20 }}>
-        <Text>如需撤销，请切换到"历史记录"标签页</Text>
+  const renderStep3 = () => {
+    if (!applyResult) return null;
+
+    const successResults = (applyResult.results || []).filter(r => r.success);
+    const failedResults = (applyResult.results || []).filter(r => !r.success);
+
+    return (
+      <div style={{ padding: '20px 0' }}>
+        <Banner
+          type={applyResult.failed > 0 ? 'warning' : 'success'}
+          description={
+            <div>
+              重命名已应用完成！
+              <br />
+              成功：{applyResult.success} 个 | 失败：{applyResult.failed} 个
+            </div>
+          }
+        />
+
+        {/* 成功的渠道 */}
+        {successResults.length > 0 && (
+          <Collapse
+            defaultActiveKey={[]}
+            style={{ marginTop: 20 }}
+          >
+            <Collapse.Panel
+              header={
+                <div>
+                  <Tag color="green" size="large">成功 {successResults.length} 个</Tag>
+                </div>
+              }
+              itemKey="success"
+            >
+              <Table
+                dataSource={successResults}
+                columns={[
+                  {
+                    title: '渠道ID',
+                    dataIndex: 'channel_id',
+                    width: 100,
+                  },
+                  {
+                    title: '渠道名称',
+                    dataIndex: 'channel_name',
+                  },
+                  {
+                    title: '更新数量',
+                    dataIndex: 'updated_count',
+                    render: (count) => <Text type="success">{count} 个映射</Text>,
+                    width: 120,
+                  },
+                ]}
+                pagination={false}
+                size="small"
+              />
+            </Collapse.Panel>
+          </Collapse>
+        )}
+
+        {/* 失败的渠道 */}
+        {failedResults.length > 0 && (
+          <Collapse
+            defaultActiveKey={['failed']}
+            style={{ marginTop: 20 }}
+          >
+            <Collapse.Panel
+              header={
+                <div>
+                  <Tag color="red" size="large">失败 {failedResults.length} 个</Tag>
+                </div>
+              }
+              itemKey="failed"
+            >
+              <Table
+                dataSource={failedResults}
+                columns={[
+                  {
+                    title: '渠道ID',
+                    dataIndex: 'channel_id',
+                    width: 100,
+                  },
+                  {
+                    title: '渠道名称',
+                    dataIndex: 'channel_name',
+                    render: (text) => <Text type="danger">{text || '未知'}</Text>,
+                  },
+                  {
+                    title: '错误信息',
+                    dataIndex: 'error',
+                    render: (error) => (
+                      <Text
+                        type="danger"
+                        size="small"
+                        style={{ fontFamily: 'monospace' }}
+                      >
+                        {error || '未知错误'}
+                      </Text>
+                    ),
+                  },
+                ]}
+                pagination={false}
+                size="small"
+              />
+            </Collapse.Panel>
+          </Collapse>
+        )}
+
+        <div style={{ marginTop: 20, textAlign: 'center' }}>
+          <Text type="tertiary">如需撤销，请切换到"历史记录"标签页</Text>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderHistory = () => {
     const columns = [
