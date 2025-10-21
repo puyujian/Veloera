@@ -253,6 +253,11 @@ func (r *ChannelTestJobRunner) executeJob(runtime *channelTestJobRuntime) {
     }
 
     _ = model.FinalizeChannelTestJob(job.ID, model.ChannelTestJobStatusSuccess, message)
+
+    // 如果是重试任务，更新父任务统计
+    if options.IsRetryJob && options.ParentJobID > 0 {
+        _ = model.RefreshChannelTestJobStats(options.ParentJobID)
+    }
 }
 
 func (r *ChannelTestJobRunner) fetchChannels(options model.ChannelTestJobOptions) ([]model.Channel, error) {

@@ -1208,7 +1208,7 @@ const ChannelsTable = () => {
   const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
   const [deletingFailedModels, setDeletingFailedModels] = useState(false);
-  const [retryingFailedModels, setRetryingFailedModels] = useState(false);
+  const [retryingBatchJob, setRetryingBatchJob] = useState(false);
   const [showFailedPreview, setShowFailedPreview] = useState(false);
   // 失败预览使用的全量失败结果列表（跨页聚合）
   const [allFailedBatchJobResults, setAllFailedBatchJobResults] = useState([]);
@@ -1746,60 +1746,32 @@ const ChannelsTable = () => {
     }
   };
 
-
-  const handleBatchRetryFailedModels = (jobId) => {
+  const handleRetryBatchJob = async (jobId) => {
     if (!jobId) {
       return;
     }
-    Modal.confirm({
-      title: t('确认批量重试失败模型'),
-      content: t('此操作将重新测试本次任务中全部失败的模型，操作期间请耐心等待，是否继续？'),
-      okText: t('确认重试'),
-      cancelText: t('取消'),
-      onOk: async () => {
-        setRetryingFailedModels(true);
-        try {
-          const res = await API.post(`/api/channel/test/jobs/${jobId}/retry_failed`);
-          const { success, message, data } = res.data || {};
-          if (success) {
-            const successCount = data?.success_count || 0;
-            const failureCount = data?.failure_count || 0;
-            const summary = Array.isArray(data?.summary) ? data.summary : [];
-            showSuccess(
-              t('批量重试失败模型完成，成功 {{success}} 条，失败 {{failure}} 条', {
-                success: successCount,
-                failure: failureCount,
-              }),
-            );
-            await refresh();
-            await fetchBatchJobDetail(jobId, {
-              silent: true,
-              keepPreview: showFailedPreview,
-              page: batchJobResultsPage,
-            });
-            setBatchJobDetail((prev) => {
-              if (!prev) {
-                return prev;
-              }
-              return {
-                ...prev,
-                retrySummary: summary,
-              };
-            });
-            if (showFailedPreview) {
-              const allFailed = await fetchAllFailedBatchJobResults(jobId);
-              setAllFailedBatchJobResults(allFailed || []);
-            }
-          } else {
-            showError(message || t('批量重试失败模型失败'));
-          }
-        } catch (error) {
-          showError(error?.message || t('批量重试失败模型失败'));
-        } finally {
-          setRetryingFailedModels(false);
-        }
-      },
-    });
+    setRetryingBatchJob(true);
+    try {
+      const res = await API.post(`/api/channel/test/jobs/${jobId}/retry`);
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('创建重试任务失败'));
+        return;
+      }
+      showSuccess(message || t('重试任务已创建，正在后台执行'));
+      // 打开批量任务面板以显示测试结果
+      setShowBatchJobPanel(true);
+      // 刷新任务列表
+      await fetchBatchJobs(true);
+      // 跳转到新创建的重试任务详情
+      if (data?.job_id) {
+        await fetchBatchJobDetail(data.job_id, { silent: false });
+      }
+    } catch (error) {
+      showError(error?.message || t('创建重试任务失败'));
+    } finally {
+      setRetryingBatchJob(false);
+    }
   };
 
   const handleBatchJobDeleteFailedModels = (jobId) => {
@@ -1982,6 +1954,27 @@ const ChannelsTable = () => {
       dataIndex: 'id',
       key: 'id',
       width: 90,
+      render: (_, record) => {
+        let options = null;
+        try {
+          options = typeof record.options === 'string' ? JSON.parse(record.options) : record.options;
+        } catch (e) {
+          // 解析失败，忽略
+        }
+        const isRetryJob = options?.is_retry_job || false;
+        const parentJobId = options?.parent_job_id || null;
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <Typography.Text>#{record.id}</Typography.Text>
+            {isRetryJob && (
+              <Tag color='orange' size='small' style={{ width: 'fit-content' }}>
+                {parentJobId ? `重试 #${parentJobId}` : '重试任务'}
+              </Tag>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: t('状态'),
@@ -2216,6 +2209,18 @@ const ChannelsTable = () => {
               <Button size='small' onClick={() => handleExportBatchJob(activeBatchJob.id)}>
                 {t('导出报告')}
               </Button>
+              {activeBatchJob.status !== 'RUNNING' &&
+               activeBatchJob.status !== 'PENDING' &&
+               activeBatchJob.failure_count > 0 && (
+                <Button
+                  size='small'
+                  type='warning'
+                  loading={retryingBatchJob}
+                  onClick={() => handleRetryBatchJob(activeBatchJob.id)}
+                >
+                  {retryingBatchJob ? t('创建中...') : t('批量重试失败模型 ({{count}})', { count: activeBatchJob.failure_count })}
+                </Button>
+              )}
             </Space>
           </div>
           <Space size='small' wrap>
@@ -2329,27 +2334,11 @@ const ChannelsTable = () => {
               </Button>
             )}
             <Button
-              type='primary'
-              size='small'
-              loading={retryingFailedModels}
-              disabled={
-                retryingFailedModels ||
-                deletingFailedModels ||
-                activeBatchJob.status === 'RUNNING' ||
-                activeBatchJob.status === 'PENDING' ||
-                failedResultCount === 0
-              }
-              onClick={() => handleBatchRetryFailedModels(activeBatchJob.id)}
-            >
-              {t('批量重试失败模型')}
-            </Button>
-            <Button
               type='danger'
               size='small'
               loading={deletingFailedModels}
               disabled={
                 deletingFailedModels ||
-                retryingFailedModels ||
                 activeBatchJob.status === 'RUNNING' ||
                 activeBatchJob.status === 'PENDING' ||
                 failedResultCount === 0
@@ -2429,6 +2418,21 @@ const ChannelsTable = () => {
                       onPageChange: handleBatchJobResultPageChange,
                       showSizeChanger: false,
                     }
+              }
+              empty={
+                <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--semi-color-text-2)' }}>
+                  {activeBatchJob && (activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING') ? (
+                    <div>
+                      <Spin size='large' style={{ marginBottom: 12 }} />
+                      <div>{t('任务正在执行中，测试结果将实时显示...')}</div>
+                      <div style={{ fontSize: 12, marginTop: 8 }}>
+                        {t('已完成')}: {activeBatchJob.completed_count || 0} / {activeBatchJob.total_models || 0}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>{t('暂无测试结果')}</div>
+                  )}
+                </div>
               }
               // 小屏下不设置表格内部纵向滚动，避免与外层 Modal 重叠滚动
               scroll={compact ? { x: 'max-content' } : { x: 'max-content', y: 420 }}
