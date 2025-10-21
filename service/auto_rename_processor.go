@@ -61,14 +61,16 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 	model = strings.TrimSpace(model)
 
 	// 1. 检查是否已经是标准 owner/model 格式
-	//    如果是标准格式（只包含一个 '/' 且两部分都不为空，且不含 ':' 后缀），则直接返回，不进行重命名
-	if slashCount := strings.Count(model, "/"); slashCount == 1 && !strings.Contains(model, ":") {
-		parts := strings.Split(model, "/")
-		if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
-			// 排除特殊前缀情况（如 BigModel/ 开头）
-			if parts[0] != "BigModel" && !strings.HasPrefix(model, "Pro/") {
-				// 已经是标准格式，直接返回
-				return model
+	//    仅在需要保留厂商前缀（includeVendor=true）时，保持现有格式直接返回
+	if includeVendor {
+		if slashCount := strings.Count(model, "/"); slashCount == 1 && !strings.Contains(model, ":") {
+			parts := strings.Split(model, "/")
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
+				// 排除特殊前缀情况（如 BigModel/ 开头）
+				if parts[0] != "BigModel" && !strings.HasPrefix(model, "Pro/") {
+					// 已经是标准格式且需要保留厂商前缀，直接返回
+					return model
+				}
 			}
 		}
 	}

@@ -776,6 +776,8 @@
   "请至少选择一个渠道或切换到全量测试": "Select at least one channel or switch to full testing.",
   "请至少选择一个模型进行测试": "Please select at least one model to test.",
   "指定模型": "Target models",
+  "展开全部模型 ({{count}})": "Expand all models ({{count}})",
+  "收起模型列表": "Collapse model list",
   "无": "None",
   "提示：任务创建后将后台异步执行，并可在“查看测试任务”中查询进度与结果。": "Hint: once created, the task runs asynchronously and progress can be tracked via \"View Test Jobs\".",
   "批量模型测试任务看板": "Batch Model Test Dashboard",

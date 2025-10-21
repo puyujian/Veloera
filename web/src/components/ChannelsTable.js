@@ -1215,6 +1215,7 @@ const ChannelsTable = () => {
   // 刷新失败预览的加载状态
   const [refreshingFailedPreview, setRefreshingFailedPreview] = useState(false);
   const [retryingResultMap, setRetryingResultMap] = useState({});
+  const [showAllTargetModels, setShowAllTargetModels] = useState(false);
 
   const removeRecord = (record) => {
     let newDataSource = [...channels];
@@ -1586,6 +1587,7 @@ const ChannelsTable = () => {
       setShowFailedPreview(false);
       setAllFailedBatchJobResults([]);
       setRefreshingFailedPreview(false);
+      setShowAllTargetModels(false);
     }
     try {
       const res = await API.get(`/api/channel/test/jobs/${jobId}`);
@@ -2185,7 +2187,7 @@ const ChannelsTable = () => {
         gap: compact ? 12 : 16,
         // 小屏交由外层 Modal 滚动；大屏保持局部布局
         maxHeight: compact ? 'none' : '72vh',
-        overflowY: compact ? 'visible' : 'hidden',
+        overflowY: compact ? 'visible' : 'auto',
       }}
     >
       {activeBatchJob ? (
@@ -2283,11 +2285,47 @@ const ChannelsTable = () => {
                   {t('测试模式')}: {batchJobDetail.options.test_mode === 'selected' ? t('指定模型测试') : t('全部模型批量测试')}
                 </div>
                 {batchJobDetail.options.test_mode === 'selected' && Array.isArray(batchJobDetail.options.target_models) && (
-                  <div>
-                    {t('指定模型')}: {' '}
-                    {batchJobDetail.options.target_models.length > 0
-                      ? batchJobDetail.options.target_models.join(', ')
-                      : t('无')}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <Typography.Text>{t('指定模型')}:</Typography.Text>
+                    {batchJobDetail.options.target_models.length > 0 ? (
+                      <React.Fragment>
+                        <div
+                          style={{
+                            maxHeight: showAllTargetModels ? 240 : 96,
+                            overflowY: batchJobDetail.options.target_models.length > 10 ? 'auto' : 'visible',
+                            padding: 8,
+                            border: '1px solid var(--semi-color-border)',
+                            borderRadius: 6,
+                            background: 'var(--semi-color-fill-0)',
+                          }}
+                        >
+                          <Space wrap spacing={6}>
+                            {batchJobDetail.options.target_models.map((modelName) => (
+                              <Tag key={modelName} size='small'>
+                                {modelName}
+                              </Tag>
+                            ))}
+                          </Space>
+                        </div>
+                        {batchJobDetail.options.target_models.length > 10 && (
+                          <Button
+                            theme='borderless'
+                            size='small'
+                            type='tertiary'
+                            style={{ alignSelf: 'flex-start', padding: 0 }}
+                            onClick={() => setShowAllTargetModels((prev) => !prev)}
+                          >
+                            {showAllTargetModels
+                              ? t('收起模型列表')
+                              : t('展开全部模型 ({{count}})', {
+                                  count: batchJobDetail.options.target_models.length,
+                                })}
+                          </Button>
+                        )}
+                      </React.Fragment>
+                    ) : (
+                      <Typography.Text>{t('无')}</Typography.Text>
+                    )}
                   </div>
                 )}
                 <div>
@@ -4696,6 +4734,7 @@ const ChannelsTable = () => {
           setRefreshingFailedPreview(false);
           setBatchJobResultsPage(1);
           setBatchJobResultsTotal(0);
+          setShowAllTargetModels(false);
         }}
         footer={
           <div
