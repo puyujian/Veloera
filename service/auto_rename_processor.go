@@ -60,6 +60,11 @@ func SystemRenameProcessor(models []string, includeVendor bool) map[string]strin
 func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp, includeVendor bool) string {
 	model = strings.TrimSpace(model)
 
+	// 0.0 对于未勾选厂商前缀且已符合标准格式的模型名称直接返回原值
+	if !includeVendor && isStandardStandaloneName(model) {
+		return model
+	}
+
 	// 1. 检查是否已经是标准 owner/model 格式
 	//    仅在需要保留厂商前缀（includeVendor=true）时，保持现有格式直接返回
 	if includeVendor {
@@ -273,6 +278,20 @@ func extractJSON(content string) string {
 
 	// 直接返回原内容
 	return content
+}
+
+// isStandardStandaloneName 判断模型名是否已经是无需处理的标准形式
+func isStandardStandaloneName(name string) bool {
+	if name == "" {
+		return false
+	}
+	if strings.Contains(name, "/") {
+		return false
+	}
+	if strings.Contains(name, ":") {
+		return false
+	}
+	return true
 }
 
 // DoHTTPRequest 发送HTTP请求（辅助函数）
