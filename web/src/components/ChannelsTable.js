@@ -5333,20 +5333,12 @@ const ChannelsTable = () => {
             const v = typeof val === 'string' ? val : (val && val.target && val.target.value) ? val.target.value : val?.value;
             setSyncMode(v || 'incremental');
           }}
-          style={{ marginBottom: 16, display: 'flex', gap: 8, width: '100%' }}
+          style={{ marginBottom: 16, display: 'flex', gap: 8 }}
         >
-          <Radio
-            value='incremental'
-            style={{ flex: 1, display: 'flex', minWidth: 0 }}
-            addonStyle={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '32px', padding: '0 16px' }}
-          >
+          <Radio value='incremental' style={{ flex: 1, minWidth: 120 }}>
             {t('增量同步')}
           </Radio>
-          <Radio
-            value='full'
-            style={{ flex: 1, display: 'flex', minWidth: 0 }}
-            addonStyle={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '32px', padding: '0 16px' }}
-          >
+          <Radio value='full' style={{ flex: 1, minWidth: 120 }}>
             {t('完全同步')}
           </Radio>
         </RadioGroup>
