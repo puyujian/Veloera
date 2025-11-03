@@ -1124,6 +1124,15 @@ const ChannelsTable = () => {
   // 自动重命名弹窗
   const [showAutoRenameModal, setShowAutoRenameModal] = useState(false);
   const [syncConcurrency, setSyncConcurrency] = useState(8);
+  // 自动更新模型弹窗
+  const [showAutoUpdateModal, setShowAutoUpdateModal] = useState(false);
+  const [autoUpdateChannelIds, setAutoUpdateChannelIds] = useState([]);
+  const [autoUpdateMode, setAutoUpdateMode] = useState('incremental'); // incremental | full
+  const [autoUpdateEnableRename, setAutoUpdateEnableRename] = useState(false);
+  const [autoUpdateIncludeVendor, setAutoUpdateIncludeVendor] = useState(true);
+  const [autoUpdating, setAutoUpdating] = useState(false);
+  const [autoUpdateResult, setAutoUpdateResult] = useState(null);
+  const [autoUpdateSearchKeyword, setAutoUpdateSearchKeyword] = useState('');
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
   const [modelSearchKeyword, setModelSearchKeyword] = useState('');
@@ -3574,6 +3583,185 @@ const ChannelsTable = () => {
     }
   };
 
+  const selectableChannels = React.useMemo(() => {
+    const list = [];
+    channels.forEach((item) => {
+      if (!item) {
+        return;
+      }
+      if (Array.isArray(item.children) && item.children.length > 0) {
+        item.children.forEach((child) => {
+          if (!child) {
+            return;
+          }
+          const id = Number(child.id);
+          if (!Number.isInteger(id) || id <= 0) {
+            return;
+          }
+          list.push({ ...child, id });
+        });
+      } else {
+        const id = Number(item.id);
+        if (!Number.isInteger(id) || id <= 0) {
+          return;
+        }
+        list.push({ ...item, id });
+      }
+    });
+    const seen = new Set();
+    const deduped = list.filter((channel) => {
+      if (seen.has(channel.id)) {
+        return false;
+      }
+      seen.add(channel.id);
+      return true;
+    });
+    return deduped.sort((a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+    });
+  }, [channels]);
+
+  const filteredAutoUpdateChannels = React.useMemo(() => {
+    const keyword = autoUpdateSearchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return selectableChannels;
+    }
+    return selectableChannels.filter((channel) => {
+      const idStr = String(channel.id || '');
+      const name = channel.name || '';
+      const group = channel.group || '';
+      const key = channel.key || '';
+      return (
+        idStr.toLowerCase().includes(keyword) ||
+        name.toLowerCase().includes(keyword) ||
+        group.toLowerCase().includes(keyword) ||
+        key.toLowerCase().includes(keyword)
+      );
+    });
+  }, [selectableChannels, autoUpdateSearchKeyword]);
+
+  const filteredSelectedCount = React.useMemo(
+    () =>
+      filteredAutoUpdateChannels.filter((channel) =>
+        autoUpdateChannelIds.includes(channel.id),
+      ).length,
+    [filteredAutoUpdateChannels, autoUpdateChannelIds],
+  );
+
+  const isAllFilteredSelected =
+    filteredAutoUpdateChannels.length > 0 &&
+    filteredSelectedCount === filteredAutoUpdateChannels.length;
+
+  const handleAutoUpdateCheckboxChange = (channelId, checked) => {
+    const id = Number(channelId);
+    if (!Number.isInteger(id) || id <= 0) {
+      return;
+    }
+    setAutoUpdateChannelIds((prev) => {
+      const next = new Set(prev.map((item) => Number(item)));
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return Array.from(next);
+    });
+  };
+
+  const toggleFilteredAutoUpdateChannels = (checked) => {
+    if (filteredAutoUpdateChannels.length === 0) {
+      return;
+    }
+    setAutoUpdateChannelIds((prev) => {
+      const next = new Set(prev.map((item) => Number(item)));
+      filteredAutoUpdateChannels.forEach((channel) => {
+        if (checked) {
+          next.add(channel.id);
+        } else {
+          next.delete(channel.id);
+        }
+      });
+      return Array.from(next);
+    });
+  };
+
+  const handleSelectAllAutoUpdateChannels = () => {
+    setAutoUpdateChannelIds(selectableChannels.map((channel) => channel.id));
+  };
+
+  const handleClearAutoUpdateSelection = () => {
+    setAutoUpdateChannelIds([]);
+  };
+
+  const handleCloseAutoUpdateModal = () => {
+    setShowAutoUpdateModal(false);
+    setAutoUpdateResult(null);
+    setAutoUpdating(false);
+  };
+
+  // 打开自动更新模型弹窗
+  const openAutoUpdateModal = () => {
+    const manualSelection = selectedChannels
+      .map((item) => Number(item?.id))
+      .filter((id) => Number.isInteger(id) && id > 0);
+
+    let initialSelection = manualSelection;
+    if (initialSelection.length === 0) {
+      initialSelection = selectableChannels
+        .filter((channel) => channel.status === 1)
+        .map((channel) => channel.id);
+    }
+
+    setAutoUpdateChannelIds(Array.from(new Set(initialSelection)));
+    setAutoUpdateSearchKeyword('');
+    setAutoUpdateResult(null);
+    setShowAutoUpdateModal(true);
+  };
+
+  // 执行自动更新模型
+  const executeAutoUpdate = async () => {
+    const validIds = Array.from(
+      new Set(autoUpdateChannelIds.map((id) => Number(id)))
+    ).filter((id) => Number.isInteger(id) && id > 0);
+
+    if (validIds.length === 0) {
+      showError(t('请至少选择一个渠道'));
+      return;
+    }
+
+    setAutoUpdating(true);
+    try {
+      const payload = {
+        channel_ids: validIds,
+        update_mode: autoUpdateMode,
+        enable_auto_rename: autoUpdateEnableRename,
+        include_vendor: autoUpdateIncludeVendor,
+      };
+
+      const res = await API.post('/api/channel/models/auto-update', payload);
+      const { success, message, data } = res.data;
+
+      if (!success) {
+        showError(message || t('自动更新失败'));
+        return;
+      }
+
+      setAutoUpdateChannelIds(validIds);
+      setAutoUpdateResult(data);
+      const succ = data?.success || 0;
+      const fail = data?.failed || 0;
+      showSuccess(t('自动更新完成：成功 {{succ}}，失败 {{fail}}', { succ, fail }));
+      await refresh();
+    } catch (error) {
+      showError(error?.message || t('自动更新失败'));
+    } finally {
+      setAutoUpdating(false);
+    }
+  };
+
+
   return (
     <React.Fragment>
       {renderColumnSelector()}
@@ -3598,6 +3786,295 @@ const ChannelsTable = () => {
           refresh();
         }}
       />
+      <Modal
+        title={t('自动更新模型')}
+        visible={showAutoUpdateModal}
+        onCancel={handleCloseAutoUpdateModal}
+        maskClosable={false}
+        centered={true}
+        style={{ width: isMobile() ? '92%' : 760 }}
+        footer={
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: isMobile() ? 'wrap' : 'nowrap',
+              gap: 12,
+            }}
+          >
+            <Typography.Text
+              type='tertiary'
+              style={{ flex: isMobile() ? '0 0 100%' : 1, minWidth: isMobile() ? '100%' : 0 }}
+            >
+              {t('已选择 {{count}} / {{total}} 个渠道', {
+                count: autoUpdateChannelIds.length,
+                total: selectableChannels.length,
+              })}
+            </Typography.Text>
+            <Space>
+              <Button onClick={handleCloseAutoUpdateModal}>{t('取消')}</Button>
+              <Button
+                type='primary'
+                loading={autoUpdating}
+                onClick={executeAutoUpdate}
+                disabled={autoUpdateChannelIds.length === 0}
+              >
+                {autoUpdating ? t('执行中...') : t('开始更新')}
+              </Button>
+            </Space>
+          </div>
+        }
+        bodyStyle={{
+          maxHeight: isMobile() ? '70vh' : '68vh',
+          overflowY: 'auto',
+          padding: isMobile() ? '16px 12px' : '24px',
+          paddingBottom: 12,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <Typography.Text type='secondary'>
+            {t('系统将从上游渠道读取模型列表，与本地配置对比后同步新增模型，并可选自动重命名。')}
+          </Typography.Text>
+
+          <div>
+            <Typography.Text strong>{t('选择渠道')}</Typography.Text>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+              <Input
+                prefix={<IconSearch />}
+                value={autoUpdateSearchKeyword}
+                onChange={(value) => setAutoUpdateSearchKeyword(value)}
+                placeholder={t('按名称、ID 或分组搜索渠道')}
+                style={{ flex: isMobile() ? '1 1 100%' : '1 1 320px', minWidth: 220 }}
+                showClear
+              />
+              <Space size='small' wrap>
+                <Button
+                  size='small'
+                  onClick={() => toggleFilteredAutoUpdateChannels(true)}
+                  disabled={filteredAutoUpdateChannels.length === 0}
+                >
+                  {t('全选当前筛选')}
+                </Button>
+                <Button
+                  size='small'
+                  onClick={() => toggleFilteredAutoUpdateChannels(false)}
+                  disabled={filteredSelectedCount === 0}
+                >
+                  {t('取消当前筛选')}
+                </Button>
+                <Button
+                  size='small'
+                  onClick={handleSelectAllAutoUpdateChannels}
+                  disabled={selectableChannels.length === 0}
+                >
+                  {t('全选全部')}
+                </Button>
+                <Button
+                  size='small'
+                  onClick={handleClearAutoUpdateSelection}
+                  disabled={autoUpdateChannelIds.length === 0}
+                >
+                  {t('清空选择')}
+                </Button>
+              </Space>
+            </div>
+            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+              {t('当前筛选命中 {{filtered}} 个，已选 {{selected}} / {{total}} 个', {
+                filtered: filteredAutoUpdateChannels.length,
+                selected: autoUpdateChannelIds.length,
+                total: selectableChannels.length,
+              })}
+            </Typography.Text>
+
+            <div
+              style={{
+                marginTop: 12,
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 8,
+                maxHeight: isMobile() ? '42vh' : '36vh',
+                overflowY: 'auto',
+                padding: 12,
+              }}
+            >
+              {filteredAutoUpdateChannels.length === 0 ? (
+                <Typography.Text type='tertiary'>{t('没有符合条件的渠道')}</Typography.Text>
+              ) : (
+                filteredAutoUpdateChannels.map((channel, index) => {
+                  const selected = autoUpdateChannelIds.includes(channel.id);
+                  const isLast = index === filteredAutoUpdateChannels.length - 1;
+                  return (
+                    <div
+                      key={channel.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '8px 0',
+                        borderBottom: isLast ? 'none' : '1px dashed var(--semi-color-border)',
+                      }}
+                    >
+                      <Checkbox
+                        checked={selected}
+                        onChange={(e) => handleAutoUpdateCheckboxChange(channel.id, e?.target?.checked)}
+                      >
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <Typography.Text strong>{channel.name || t('未命名渠道')}</Typography.Text>
+                          <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
+                            ID {channel.id}
+                            {channel.group ? ` · ${channel.group}` : ''}
+                          </Typography.Text>
+                        </div>
+                      </Checkbox>
+                      <Space size='small'>
+                        {renderStatus(channel.status)}
+                        {renderType(channel.type)}
+                      </Space>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div>
+            <Typography.Text strong>{t('更新模式')}</Typography.Text>
+            <RadioGroup
+              type='button'
+              value={autoUpdateMode}
+              onChange={(val) => {
+                const value =
+                  typeof val === 'string'
+                    ? val
+                    : val?.target?.value || val?.value || 'incremental';
+                setAutoUpdateMode(value);
+              }}
+              style={{ marginTop: 12, display: 'flex', gap: 8 }}
+            >
+              <Radio value='incremental' style={{ flex: 1, minWidth: 120 }}>
+                {t('增量同步')}
+              </Radio>
+              <Radio value='full' style={{ flex: 1, minWidth: 120 }}>
+                {t('完全同步')}
+              </Radio>
+            </RadioGroup>
+            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+              {autoUpdateMode === 'incremental'
+                ? t('仅新增上游未存在的模型，保留本地已有模型列表。')
+                : t('以上游模型列表为准，覆盖本地模型配置。')}
+            </Typography.Text>
+          </div>
+
+          <div
+            style={{
+              border: '1px solid var(--semi-color-border)',
+              borderRadius: 8,
+              padding: 12,
+              background: 'var(--semi-color-fill-0)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Typography.Text strong>{t('自动重命名')}</Typography.Text>
+              <Switch checked={autoUpdateEnableRename} onChange={(checked) => setAutoUpdateEnableRename(!!checked)} />
+            </div>
+            <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 8 }}>
+              {t('对新增模型应用系统重命名规则，保持模型命名一致性。')}
+            </Typography.Text>
+            {autoUpdateEnableRename && (
+              <Checkbox
+                style={{ marginTop: 12 }}
+                checked={autoUpdateIncludeVendor}
+                onChange={(e) => setAutoUpdateIncludeVendor(!!e?.target?.checked)}
+              >
+                {t('包含厂商前缀（如 Anthropic/claude-3.5-sonnet）')}
+              </Checkbox>
+            )}
+          </div>
+
+          {autoUpdateResult && (
+            <div
+              style={{
+                border: '1px solid var(--semi-color-border)',
+                borderRadius: 8,
+                padding: 12,
+                background: 'var(--semi-color-fill-0)',
+              }}
+            >
+              <Typography.Text strong>
+                {t('执行结果：总计 {{total}}，成功 {{success}}，失败 {{failed}}', {
+                  total: autoUpdateResult.total || 0,
+                  success: autoUpdateResult.success || 0,
+                  failed: autoUpdateResult.failed || 0,
+                })}
+              </Typography.Text>
+              <div style={{ marginTop: 12, maxHeight: '30vh', overflowY: 'auto' }}>
+                {Array.isArray(autoUpdateResult.results) && autoUpdateResult.results.length > 0 ? (
+                  autoUpdateResult.results.map((item, index) => {
+                    const success = item.success;
+                    const isLast = index === autoUpdateResult.results.length - 1;
+                    return (
+                      <div
+                        key={item.channel_id || index}
+                        style={{
+                          padding: '8px 0',
+                          borderBottom: isLast ? 'none' : '1px dashed var(--semi-color-border)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: 12,
+                          }}
+                        >
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <Typography.Text strong>
+                              {item.channel_name || t('未知渠道')}
+                            </Typography.Text>
+                            <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
+                              ID {item.channel_id || '-'} · {t('模型数 {{before}} → {{after}}（上游 {{upstream}}）', {
+                                before: item.before_count ?? 0,
+                                after: item.after_count ?? 0,
+                                upstream: item.upstream_count ?? 0,
+                              })}
+                            </Typography.Text>
+                          </div>
+                          <Space size='small'>
+                            <Tag color={success ? 'green' : 'red'}>
+                              {success ? t('成功') : t('失败')}
+                            </Tag>
+                            {item.auto_rename_applied ? (
+                              <Tag color='blue'>{t('已重命名')}</Tag>
+                            ) : null}
+                          </Space>
+                        </div>
+                        {success ? (
+                          <Typography.Text type='tertiary' style={{ display: 'block', marginTop: 6 }}>
+                            {item.added_models?.length
+                              ? `${t('新增模型')}: ${item.added_models.slice(0, 5).join(', ')}${
+                                  item.added_models.length > 5
+                                    ? ` ${t('等 {{count}} 个', { count: item.added_models.length })}`
+                                    : ''
+                                }`
+                              : t('本次未新增模型')}
+                          </Typography.Text>
+                        ) : (
+                          <Typography.Text type='danger' style={{ display: 'block', marginTop: 6 }}>
+                            {item.error || t('未知错误')}
+                          </Typography.Text>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <Typography.Text type='tertiary'>{t('没有可显示的结果')}</Typography.Text>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </Modal>
       <Form
         onSubmit={() => {
           searchChannels(
@@ -3860,6 +4337,16 @@ const ChannelsTable = () => {
                       onClick={() => setShowAutoRenameModal(true)}
                     >
                       {t('自动重命名')}
+                    </Button>
+                  </Dropdown.Item>
+                  <Dropdown.Item>
+                    <Button
+                      theme='light'
+                      type='tertiary'
+                      style={{ width: '100%' }}
+                      onClick={openAutoUpdateModal}
+                    >
+                      {t('自动更新模型')}
                     </Button>
                   </Dropdown.Item>
                 </Dropdown.Menu>
