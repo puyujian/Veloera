@@ -72,6 +72,8 @@ type ChannelTestJobOptions struct {
     UseChannelDefault bool                `json:"use_channel_default"`
     TestMode          ChannelTestJobMode  `json:"test_mode"`
     TargetModels      []string            `json:"target_models"`
+    ParentJobID       int64               `json:"parent_job_id"`   // 父任务ID（重试任务时使用）
+    IsRetryJob        bool                `json:"is_retry_job"`    // 是否为重试任务
 }
 
 // DefaultChannelTestJobOptions 返回默认配置

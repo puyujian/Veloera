@@ -17,6 +17,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -171,6 +172,86 @@ func getChannelQuery(group string, model string, retry int) *gorm.DB {
 	return channelQuery
 }
 
+// findRenamedModelInMappings 在所有启用渠道的 ModelMapping 中反向查找重命名后的模型名
+// 参数: group - 分组名, originalModel - 原始模型名
+// 返回: (重命名后的模型名, 是否找到)
+func findRenamedModelInMappings(group string, originalModel string) (string, bool) {
+	var channels []*Channel
+
+	// 查询该分组下所有启用的渠道
+	groupCol := "`group`"
+	if common.UsingPostgreSQL {
+		groupCol = `"group"`
+	}
+
+	query := DB.Where("status = ?", common.ChannelStatusEnabled)
+	if group != "" {
+		var condition string
+		if common.UsingMySQL {
+			condition = fmt.Sprintf("CONCAT(',', %s, ',') LIKE ?", groupCol)
+		} else {
+			condition = fmt.Sprintf("(',' || %s || ',') LIKE ?", groupCol)
+		}
+		query = query.Where(condition, "%,"+group+",%")
+	}
+
+	err := query.Find(&channels).Error
+	if err != nil {
+		return "", false
+	}
+
+	// 遍历所有渠道的 ModelMapping，查找是否有映射到 originalModel
+	for _, ch := range channels {
+		if ch.ModelMapping == nil || *ch.ModelMapping == "" || *ch.ModelMapping == "{}" {
+			continue
+		}
+
+		var modelMapping map[string]string
+		if err := json.Unmarshal([]byte(*ch.ModelMapping), &modelMapping); err != nil {
+			continue
+		}
+
+		// 查找反向映射: {"gpt-4o": "gpt-4"} 中找 "gpt-4"
+		for renamedModel, origModel := range modelMapping {
+			if strings.TrimSpace(origModel) == originalModel {
+				return strings.TrimSpace(renamedModel), true
+			}
+		}
+	}
+
+	return "", false
+}
+
+// selectChannelFromAbilities 从 abilities 列表中根据权重选择一个渠道
+func selectChannelFromAbilities(abilities []Ability) (*Channel, error) {
+	if len(abilities) == 0 {
+		return nil, errors.New("no abilities provided")
+	}
+
+	channel := Channel{}
+	weightSum := uint(0)
+	for _, ability_ := range abilities {
+		weightSum += ability_.Weight + 10
+	}
+
+	weight := common.GetRandomInt(int(weightSum))
+	for _, ability_ := range abilities {
+		weight -= int(ability_.Weight) + 10
+		if weight <= 0 {
+			channel.Id = ability_.ChannelId
+			break
+		}
+	}
+
+	dbErr := DB.First(&channel, "id = ?", channel.Id).Error
+	if dbErr != nil {
+		common.SysError(fmt.Sprintf("查询渠道信息失败: channel_id=%d, 错误=%s", channel.Id, dbErr.Error()))
+		return nil, dbErr
+	}
+
+	return &channel, nil
+}
+
 func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel, error) {
 	// 调用全局模型映射服务，将虚拟模型名转换为实际模型名
 	actualModel, err := GetActualModel(model)
@@ -186,6 +267,7 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 
 	var abilities []Ability
 
+	// 第一次尝试：直接查询
 	var dbErr error = nil
 	channelQuery := getChannelQuery(group, actualModel, retry)
 	if common.UsingSQLite || common.UsingPostgreSQL {
@@ -198,53 +280,96 @@ func GetRandomSatisfiedChannel(group string, model string, retry int) (*Channel,
 		return nil, dbErr
 	}
 
-	channel := Channel{}
+	// 如果找到了，直接返回
 	if len(abilities) > 0 {
-		// Randomly choose one
-		weightSum := uint(0)
-		for _, ability_ := range abilities {
-			weightSum += ability_.Weight + 10
-		}
-		// Randomly choose one
-		weight := common.GetRandomInt(int(weightSum))
-		for _, ability_ := range abilities {
-			weight -= int(ability_.Weight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
-			if weight <= 0 {
-				channel.Id = ability_.ChannelId
-				break
-			}
-		}
-	} else {
-		common.SysError(fmt.Sprintf("没有找到可用渠道: group=%s, model=%s", group, actualModel))
-		return nil, errors.New("no channels available")
+		return selectChannelFromAbilities(abilities)
 	}
 
-	dbErr = DB.First(&channel, "id = ?", channel.Id).Error
-	if dbErr != nil {
-		common.SysError(fmt.Sprintf("查询渠道信息失败: channel_id=%d, 错误=%s", channel.Id, dbErr.Error()))
-		return nil, dbErr
+	// 第二次尝试：反向映射查找（兼容原始模型名请求）
+	renamedModel, found := findRenamedModelInMappings(group, actualModel)
+	if found {
+		common.SysLog(fmt.Sprintf("原始模型反向映射: %s -> %s", actualModel, renamedModel))
+		channelQuery = getChannelQuery(group, renamedModel, retry)
+		if common.UsingSQLite || common.UsingPostgreSQL {
+			dbErr = channelQuery.Order("weight DESC").Find(&abilities).Error
+		} else {
+			dbErr = channelQuery.Order("weight DESC").Find(&abilities).Error
+		}
+		if dbErr != nil {
+			common.SysError(fmt.Sprintf("反向映射查询失败: group=%s, model=%s, 错误=%s", group, renamedModel, dbErr.Error()))
+			return nil, dbErr
+		}
+
+		if len(abilities) > 0 {
+			return selectChannelFromAbilities(abilities)
+		}
 	}
 
-	return &channel, dbErr
+	// 都找不到，返回错误
+	common.SysError(fmt.Sprintf("没有找到可用渠道: group=%s, model=%s", group, actualModel))
+	return nil, errors.New("no channels available")
 }
 
 func (channel *Channel) AddAbilities() error {
+	// 解析 ModelMapping，构建反向映射：原始名 -> []重命名名（支持一对多）
+	reverseMapping := make(map[string][]string)
+	if channel.ModelMapping != nil && *channel.ModelMapping != "" && *channel.ModelMapping != "{}" {
+		var modelMapping map[string]string
+		if err := json.Unmarshal([]byte(*channel.ModelMapping), &modelMapping); err == nil {
+			for renamedModel, originalModel := range modelMapping {
+				origTrimmed := strings.TrimSpace(originalModel)
+				renamedTrimmed := strings.TrimSpace(renamedModel)
+				reverseMapping[origTrimmed] = append(reverseMapping[origTrimmed], renamedTrimmed)
+			}
+		}
+	}
+
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
 	abilities := make([]Ability, 0, len(models_))
+
+	// 用于去重（避免重复创建同一个模型的 ability）
+	seenModels := make(map[string]bool)
+
 	for _, model := range models_ {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+
+		// 收集该原始模型的所有名称（原始名 + 所有重命名）
+		modelNames := []string{model} // 默认包含原始名称
+		if renamedNames, exists := reverseMapping[model]; exists {
+			// 如果有重命名，只使用重命名后的名称，不包含原始名称
+			modelNames = renamedNames
+		}
+
 		for _, group := range groups_ {
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
 			}
-			abilities = append(abilities, ability)
+
+			// 为每个名称创建 ability（包括原始名或所有重命名）
+			for _, modelName := range modelNames {
+				// 去重检查
+				dedupeKey := group + ":" + modelName
+				if seenModels[dedupeKey] {
+					continue
+				}
+				seenModels[dedupeKey] = true
+
+				ability := Ability{
+					Group:     group,
+					Model:     modelName,
+					ChannelId: channel.Id,
+					Enabled:   channel.Status == common.ChannelStatusEnabled,
+					Priority:  channel.Priority,
+					Weight:    uint(channel.GetWeight()),
+					Tag:       channel.Tag,
+				}
+				abilities = append(abilities, ability)
+			}
 		}
 	}
 	if len(abilities) == 0 {
@@ -290,22 +415,66 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 		return err
 	}
 
+	// 解析 ModelMapping，构建反向映射：原始名 -> []重命名名（支持一对多）
+	reverseMapping := make(map[string][]string)
+	if channel.ModelMapping != nil && *channel.ModelMapping != "" && *channel.ModelMapping != "{}" {
+		var modelMapping map[string]string
+		if err := json.Unmarshal([]byte(*channel.ModelMapping), &modelMapping); err == nil {
+			for renamedModel, originalModel := range modelMapping {
+				origTrimmed := strings.TrimSpace(originalModel)
+				renamedTrimmed := strings.TrimSpace(renamedModel)
+				reverseMapping[origTrimmed] = append(reverseMapping[origTrimmed], renamedTrimmed)
+			}
+		}
+	}
+
 	// Then add new abilities
 	models_ := strings.Split(channel.Models, ",")
 	groups_ := strings.Split(channel.Group, ",")
 	abilities := make([]Ability, 0, len(models_))
+
+	// 用于去重（避免重复创建同一个模型的 ability）
+	seenModels := make(map[string]bool)
+
 	for _, model := range models_ {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+
+		// 收集该原始模型的所有名称（原始名 + 所有重命名）
+		modelNames := []string{model} // 默认包含原始名称
+		if renamedNames, exists := reverseMapping[model]; exists {
+			// 如果有重命名，只使用重命名后的名称，不包含原始名称
+			modelNames = renamedNames
+		}
+
 		for _, group := range groups_ {
-			ability := Ability{
-				Group:     group,
-				Model:     model,
-				ChannelId: channel.Id,
-				Enabled:   channel.Status == common.ChannelStatusEnabled,
-				Priority:  channel.Priority,
-				Weight:    uint(channel.GetWeight()),
-				Tag:       channel.Tag,
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
 			}
-			abilities = append(abilities, ability)
+
+			// 为每个名称创建 ability（包括原始名或所有重命名）
+			for _, modelName := range modelNames {
+				// 去重检查
+				dedupeKey := group + ":" + modelName
+				if seenModels[dedupeKey] {
+					continue
+				}
+				seenModels[dedupeKey] = true
+
+				ability := Ability{
+					Group:     group,
+					Model:     modelName,
+					ChannelId: channel.Id,
+					Enabled:   channel.Status == common.ChannelStatusEnabled,
+					Priority:  channel.Priority,
+					Weight:    uint(channel.GetWeight()),
+					Tag:       channel.Tag,
+				}
+				abilities = append(abilities, ability)
+			}
 		}
 	}
 

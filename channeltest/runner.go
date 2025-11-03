@@ -10,6 +10,7 @@ import (
     "sync/atomic"
     "time"
     "veloera/common"
+    "veloera/dto"
     "veloera/model"
 
     "github.com/bytedance/gopkg/util/gopool"
@@ -155,6 +156,7 @@ func (r *ChannelTestJobRunner) executeJob(runtime *channelTestJobRuntime) {
     taskCh := make(chan channelTestTask)
     var processed int64
     var skipped int64
+    var retryWG sync.WaitGroup // 用于跟踪429异步重试任务
 
     workerWG := sync.WaitGroup{}
     for i := 0; i < concurrency; i++ {
@@ -172,7 +174,7 @@ func (r *ChannelTestJobRunner) executeJob(runtime *channelTestJobRuntime) {
                     "current_model":   task.model,
                 })
 
-                outcome, canceled := r.executeSingleTask(runtime.ctx, job, task, retryLimit, interval)
+                outcome, canceled := r.executeSingleTask(runtime.ctx, job, task, retryLimit, interval, &retryWG, &processed)
                 if canceled {
                     atomic.AddInt64(&skipped, 1)
                     continue
@@ -218,6 +220,9 @@ func (r *ChannelTestJobRunner) executeJob(runtime *channelTestJobRuntime) {
     workerWG.Wait()
     <-dispatcherDone
 
+    // 等待所有429异步重试任务完成
+    retryWG.Wait()
+
     totalTasks := len(tasks)
     completed := int(atomic.LoadInt64(&processed))
     canceledCount := int(atomic.LoadInt64(&skipped))
@@ -253,6 +258,11 @@ func (r *ChannelTestJobRunner) executeJob(runtime *channelTestJobRuntime) {
     }
 
     _ = model.FinalizeChannelTestJob(job.ID, model.ChannelTestJobStatusSuccess, message)
+
+    // 如果是重试任务，更新父任务统计
+    if options.IsRetryJob && options.ParentJobID > 0 {
+        _ = model.RefreshChannelTestJobStats(options.ParentJobID)
+    }
 }
 
 func (r *ChannelTestJobRunner) fetchChannels(options model.ChannelTestJobOptions) ([]model.Channel, error) {
@@ -303,7 +313,7 @@ func (r *ChannelTestJobRunner) buildTasks(channels []model.Channel, options mode
     return tasks
 }
 
-func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model.ChannelTestJob, task channelTestTask, retryLimit int, interval int) (*model.ChannelTestResult, bool) {
+func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model.ChannelTestJob, task channelTestTask, retryLimit int, interval int, retryWG *sync.WaitGroup, processed *int64) (*model.ChannelTestResult, bool) {
     attempts := retryLimit + 1
     var lastErr error
     var openAIErrorMessage string
@@ -313,10 +323,13 @@ func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model
         if ctx.Err() != nil {
             return nil, true
         }
+
         consumed, lastErr, errWithCode := ExecuteChannelTest(task.channel, task.model)
         if errWithCode != nil && errWithCode.Error.Message != "" {
             openAIErrorMessage = fmt.Sprintf("%s (code %v)", errWithCode.Error.Message, errWithCode.Error.Code)
         }
+
+        // 成功则返回
         if lastErr == nil {
             result := &model.ChannelTestResult{
                 JobID:          job.ID,
@@ -330,6 +343,18 @@ func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model
             }
             return result, false
         }
+
+        // 检测是否为429错误
+        is429 := is429Error(lastErr, errWithCode)
+        if is429 {
+            // 启动异步429重试，不阻塞当前worker
+            common.SysLog(fmt.Sprintf("渠道 #%d 模型 %s 遇到429错误，启动异步重试（不阻塞worker）", task.channel.Id, task.model))
+            retryWG.Add(1)
+            go r.handle429RetryAsync(ctx, job, task, retryLimit, retryWG, processed, attempt)
+            return nil, false // 返回nil让worker继续处理下一个任务
+        }
+
+        // 非429错误：进行常规重试
         if attempt < retryLimit {
             select {
             case <-ctx.Done():
@@ -360,6 +385,121 @@ func (r *ChannelTestJobRunner) executeSingleTask(ctx context.Context, job *model
         ErrorMessage:   message,
     }
     return result, false
+}
+
+// handle429RetryAsync 异步处理429重试，不阻塞worker线程
+func (r *ChannelTestJobRunner) handle429RetryAsync(ctx context.Context, job *model.ChannelTestJob, task channelTestTask, retryLimit int, retryWG *sync.WaitGroup, processed *int64, initialAttempt int) {
+    defer retryWG.Done()
+
+    const max429Retries = 3 // 最多重试3次
+    var lastErr error
+    var openAIErrorMessage string
+    var consumed float64
+
+    for retry429Count := 1; retry429Count <= max429Retries; retry429Count++ {
+        // 等待60秒
+        common.SysLog(fmt.Sprintf("渠道 #%d 模型 %s 的429异步重试（第%d/%d次），等待60秒", task.channel.Id, task.model, retry429Count, max429Retries))
+        select {
+        case <-ctx.Done():
+            common.SysLog(fmt.Sprintf("渠道 #%d 模型 %s 的429异步重试被取消", task.channel.Id, task.model))
+            return
+        case <-time.After(60 * time.Second):
+        }
+
+        // 重新执行测试
+        consumed, lastErr, errWithCode := ExecuteChannelTest(task.channel, task.model)
+        if errWithCode != nil && errWithCode.Error.Message != "" {
+            openAIErrorMessage = fmt.Sprintf("%s (code %v)", errWithCode.Error.Message, errWithCode.Error.Code)
+        }
+
+        // 成功
+        if lastErr == nil {
+            result := &model.ChannelTestResult{
+                JobID:          job.ID,
+                ChannelID:      task.channel.Id,
+                ChannelName:    task.channel.Name,
+                ModelName:      task.model,
+                Success:        true,
+                ResultStatus:   model.ChannelTestResultStatusSuccess,
+                DurationMillis: int(math.Round(consumed * 1000)),
+                RetryCount:     initialAttempt + retry429Count,
+            }
+            _ = model.AddChannelTestResult(result)
+            _ = model.IncrementChannelTestJobCounters(job.ID, result.ChannelID, result.ModelName, result.Success)
+            atomic.AddInt64(processed, 1)
+            common.SysLog(fmt.Sprintf("渠道 #%d 模型 %s 的429异步重试成功", task.channel.Id, task.model))
+            return
+        }
+
+        // 检测是否还是429错误
+        is429 := is429Error(lastErr, errWithCode)
+        if !is429 {
+            // 非429错误，停止重试并记录失败结果
+            break
+        }
+
+        // 如果达到重试上限，跳出循环
+        if retry429Count >= max429Retries {
+            common.SysLog(fmt.Sprintf("渠道 #%d 模型 %s 的429异步重试次数已达上限", task.channel.Id, task.model))
+            break
+        }
+    }
+
+    // 所有重试都失败，记录失败结果
+    message := ""
+    if openAIErrorMessage != "" {
+        message = openAIErrorMessage
+    } else if lastErr != nil {
+        message = lastErr.Error()
+    } else {
+        message = "未知错误"
+    }
+
+    result := &model.ChannelTestResult{
+        JobID:          job.ID,
+        ChannelID:      task.channel.Id,
+        ChannelName:    task.channel.Name,
+        ModelName:      task.model,
+        Success:        false,
+        ResultStatus:   model.ChannelTestResultStatusFailed,
+        DurationMillis: int(math.Round(consumed * 1000)),
+        RetryCount:     retryLimit,
+        ErrorMessage:   message,
+    }
+    _ = model.AddChannelTestResult(result)
+    _ = model.IncrementChannelTestJobCounters(job.ID, result.ChannelID, result.ModelName, result.Success)
+    atomic.AddInt64(processed, 1)
+    common.SysLog(fmt.Sprintf("渠道 #%d 模型 %s 的429异步重试最终失败: %s", task.channel.Id, task.model, message))
+}
+
+// is429Error 检测错误是否为429 Rate Limit错误
+func is429Error(err error, errWithCode *dto.OpenAIErrorWithStatusCode) bool {
+    if err == nil {
+        return false
+    }
+
+    // 检查错误信息中是否包含429
+    if strings.Contains(err.Error(), "429") {
+        return true
+    }
+
+    // 检查OpenAI错误结构
+    if errWithCode != nil {
+        // 检查错误码
+        if codeStr := fmt.Sprintf("%v", errWithCode.Error.Code); strings.Contains(codeStr, "429") {
+            return true
+        }
+        // 检查错误消息
+        if strings.Contains(errWithCode.Error.Message, "429") {
+            return true
+        }
+        // 检查HTTP状态码
+        if errWithCode.StatusCode == 429 {
+            return true
+        }
+    }
+
+    return false
 }
 
 func sanitizeConcurrency(value int) int {

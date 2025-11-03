@@ -77,6 +77,7 @@ import {
 } from '@douyinfe/semi-icons';
 import { loadChannelModels } from './utils.js';
 import EditTagModal from '../pages/Channel/EditTagModal.js';
+import AutoRenameModal from './AutoRenameModal.js';
 import TextNumberInput from './custom/TextNumberInput.js';
 import { useTranslation } from 'react-i18next';
 
@@ -1120,6 +1121,8 @@ const ChannelsTable = () => {
   const [applying, setApplying] = useState(false);
   const [syncEnabledOnly, setSyncEnabledOnly] = useState(false);
   const [syncSelectedOnly, setSyncSelectedOnly] = useState(false);
+  // 自动重命名弹窗
+  const [showAutoRenameModal, setShowAutoRenameModal] = useState(false);
   const [syncConcurrency, setSyncConcurrency] = useState(8);
   const [showModelTestModal, setShowModelTestModal] = useState(false);
   const [currentTestChannel, setCurrentTestChannel] = useState(null);
@@ -1205,13 +1208,14 @@ const ChannelsTable = () => {
   const [batchJobResultsTotal, setBatchJobResultsTotal] = useState(0);
   const [batchJobResultsLoading, setBatchJobResultsLoading] = useState(false);
   const [deletingFailedModels, setDeletingFailedModels] = useState(false);
-  const [retryingFailedModels, setRetryingFailedModels] = useState(false);
+  const [retryingBatchJob, setRetryingBatchJob] = useState(false);
   const [showFailedPreview, setShowFailedPreview] = useState(false);
   // 失败预览使用的全量失败结果列表（跨页聚合）
   const [allFailedBatchJobResults, setAllFailedBatchJobResults] = useState([]);
   // 刷新失败预览的加载状态
   const [refreshingFailedPreview, setRefreshingFailedPreview] = useState(false);
   const [retryingResultMap, setRetryingResultMap] = useState({});
+  const [showAllTargetModels, setShowAllTargetModels] = useState(false);
 
   const removeRecord = (record) => {
     let newDataSource = [...channels];
@@ -1583,6 +1587,7 @@ const ChannelsTable = () => {
       setShowFailedPreview(false);
       setAllFailedBatchJobResults([]);
       setRefreshingFailedPreview(false);
+      setShowAllTargetModels(false);
     }
     try {
       const res = await API.get(`/api/channel/test/jobs/${jobId}`);
@@ -1743,60 +1748,32 @@ const ChannelsTable = () => {
     }
   };
 
-
-  const handleBatchRetryFailedModels = (jobId) => {
+  const handleRetryBatchJob = async (jobId) => {
     if (!jobId) {
       return;
     }
-    Modal.confirm({
-      title: t('确认批量重试失败模型'),
-      content: t('此操作将重新测试本次任务中全部失败的模型，操作期间请耐心等待，是否继续？'),
-      okText: t('确认重试'),
-      cancelText: t('取消'),
-      onOk: async () => {
-        setRetryingFailedModels(true);
-        try {
-          const res = await API.post(`/api/channel/test/jobs/${jobId}/retry_failed`);
-          const { success, message, data } = res.data || {};
-          if (success) {
-            const successCount = data?.success_count || 0;
-            const failureCount = data?.failure_count || 0;
-            const summary = Array.isArray(data?.summary) ? data.summary : [];
-            showSuccess(
-              t('批量重试失败模型完成，成功 {{success}} 条，失败 {{failure}} 条', {
-                success: successCount,
-                failure: failureCount,
-              }),
-            );
-            await refresh();
-            await fetchBatchJobDetail(jobId, {
-              silent: true,
-              keepPreview: showFailedPreview,
-              page: batchJobResultsPage,
-            });
-            setBatchJobDetail((prev) => {
-              if (!prev) {
-                return prev;
-              }
-              return {
-                ...prev,
-                retrySummary: summary,
-              };
-            });
-            if (showFailedPreview) {
-              const allFailed = await fetchAllFailedBatchJobResults(jobId);
-              setAllFailedBatchJobResults(allFailed || []);
-            }
-          } else {
-            showError(message || t('批量重试失败模型失败'));
-          }
-        } catch (error) {
-          showError(error?.message || t('批量重试失败模型失败'));
-        } finally {
-          setRetryingFailedModels(false);
-        }
-      },
-    });
+    setRetryingBatchJob(true);
+    try {
+      const res = await API.post(`/api/channel/test/jobs/${jobId}/retry`);
+      const { success, message, data } = res.data;
+      if (!success) {
+        showError(message || t('创建重试任务失败'));
+        return;
+      }
+      showSuccess(message || t('重试任务已创建，正在后台执行'));
+      // 打开批量任务面板以显示测试结果
+      setShowBatchJobPanel(true);
+      // 刷新任务列表
+      await fetchBatchJobs(true);
+      // 跳转到新创建的重试任务详情
+      if (data?.job_id) {
+        await fetchBatchJobDetail(data.job_id, { silent: false });
+      }
+    } catch (error) {
+      showError(error?.message || t('创建重试任务失败'));
+    } finally {
+      setRetryingBatchJob(false);
+    }
   };
 
   const handleBatchJobDeleteFailedModels = (jobId) => {
@@ -1979,6 +1956,27 @@ const ChannelsTable = () => {
       dataIndex: 'id',
       key: 'id',
       width: 90,
+      render: (_, record) => {
+        let options = null;
+        try {
+          options = typeof record.options === 'string' ? JSON.parse(record.options) : record.options;
+        } catch (e) {
+          // 解析失败，忽略
+        }
+        const isRetryJob = options?.is_retry_job || false;
+        const parentJobId = options?.parent_job_id || null;
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <Typography.Text>#{record.id}</Typography.Text>
+            {isRetryJob && (
+              <Tag color='orange' size='small' style={{ width: 'fit-content' }}>
+                {parentJobId ? `重试 #${parentJobId}` : '重试任务'}
+              </Tag>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: t('状态'),
@@ -2189,7 +2187,7 @@ const ChannelsTable = () => {
         gap: compact ? 12 : 16,
         // 小屏交由外层 Modal 滚动；大屏保持局部布局
         maxHeight: compact ? 'none' : '72vh',
-        overflowY: compact ? 'visible' : 'hidden',
+        overflowY: compact ? 'visible' : 'auto',
       }}
     >
       {activeBatchJob ? (
@@ -2213,6 +2211,18 @@ const ChannelsTable = () => {
               <Button size='small' onClick={() => handleExportBatchJob(activeBatchJob.id)}>
                 {t('导出报告')}
               </Button>
+              {activeBatchJob.status !== 'RUNNING' &&
+               activeBatchJob.status !== 'PENDING' &&
+               activeBatchJob.failure_count > 0 && (
+                <Button
+                  size='small'
+                  type='warning'
+                  loading={retryingBatchJob}
+                  onClick={() => handleRetryBatchJob(activeBatchJob.id)}
+                >
+                  {retryingBatchJob ? t('创建中...') : t('批量重试失败模型 ({{count}})', { count: activeBatchJob.failure_count })}
+                </Button>
+              )}
             </Space>
           </div>
           <Space size='small' wrap>
@@ -2275,11 +2285,47 @@ const ChannelsTable = () => {
                   {t('测试模式')}: {batchJobDetail.options.test_mode === 'selected' ? t('指定模型测试') : t('全部模型批量测试')}
                 </div>
                 {batchJobDetail.options.test_mode === 'selected' && Array.isArray(batchJobDetail.options.target_models) && (
-                  <div>
-                    {t('指定模型')}: {' '}
-                    {batchJobDetail.options.target_models.length > 0
-                      ? batchJobDetail.options.target_models.join(', ')
-                      : t('无')}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <Typography.Text>{t('指定模型')}:</Typography.Text>
+                    {batchJobDetail.options.target_models.length > 0 ? (
+                      <React.Fragment>
+                        <div
+                          style={{
+                            maxHeight: showAllTargetModels ? 240 : 96,
+                            overflowY: batchJobDetail.options.target_models.length > 10 ? 'auto' : 'visible',
+                            padding: 8,
+                            border: '1px solid var(--semi-color-border)',
+                            borderRadius: 6,
+                            background: 'var(--semi-color-fill-0)',
+                          }}
+                        >
+                          <Space wrap spacing={6}>
+                            {batchJobDetail.options.target_models.map((modelName) => (
+                              <Tag key={modelName} size='small'>
+                                {modelName}
+                              </Tag>
+                            ))}
+                          </Space>
+                        </div>
+                        {batchJobDetail.options.target_models.length > 10 && (
+                          <Button
+                            theme='borderless'
+                            size='small'
+                            type='tertiary'
+                            style={{ alignSelf: 'flex-start', padding: 0 }}
+                            onClick={() => setShowAllTargetModels((prev) => !prev)}
+                          >
+                            {showAllTargetModels
+                              ? t('收起模型列表')
+                              : t('展开全部模型 ({{count}})', {
+                                  count: batchJobDetail.options.target_models.length,
+                                })}
+                          </Button>
+                        )}
+                      </React.Fragment>
+                    ) : (
+                      <Typography.Text>{t('无')}</Typography.Text>
+                    )}
                   </div>
                 )}
                 <div>
@@ -2326,27 +2372,11 @@ const ChannelsTable = () => {
               </Button>
             )}
             <Button
-              type='primary'
-              size='small'
-              loading={retryingFailedModels}
-              disabled={
-                retryingFailedModels ||
-                deletingFailedModels ||
-                activeBatchJob.status === 'RUNNING' ||
-                activeBatchJob.status === 'PENDING' ||
-                failedResultCount === 0
-              }
-              onClick={() => handleBatchRetryFailedModels(activeBatchJob.id)}
-            >
-              {t('批量重试失败模型')}
-            </Button>
-            <Button
               type='danger'
               size='small'
               loading={deletingFailedModels}
               disabled={
                 deletingFailedModels ||
-                retryingFailedModels ||
                 activeBatchJob.status === 'RUNNING' ||
                 activeBatchJob.status === 'PENDING' ||
                 failedResultCount === 0
@@ -2426,6 +2456,21 @@ const ChannelsTable = () => {
                       onPageChange: handleBatchJobResultPageChange,
                       showSizeChanger: false,
                     }
+              }
+              empty={
+                <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--semi-color-text-2)' }}>
+                  {activeBatchJob && (activeBatchJob.status === 'RUNNING' || activeBatchJob.status === 'PENDING') ? (
+                    <div>
+                      <Spin size='large' style={{ marginBottom: 12 }} />
+                      <div>{t('任务正在执行中，测试结果将实时显示...')}</div>
+                      <div style={{ fontSize: 12, marginTop: 8 }}>
+                        {t('已完成')}: {activeBatchJob.completed_count || 0} / {activeBatchJob.total_models || 0}
+                      </div>
+                    </div>
+                  ) : (
+                    <div>{t('暂无测试结果')}</div>
+                  )}
+                </div>
               }
               // 小屏下不设置表格内部纵向滚动，避免与外层 Modal 重叠滚动
               scroll={compact ? { x: 'max-content' } : { x: 'max-content', y: 420 }}
@@ -3544,6 +3589,15 @@ const ChannelsTable = () => {
         handleClose={closeEdit}
         editingChannel={editingChannel}
       />
+      <AutoRenameModal
+        visible={showAutoRenameModal}
+        onClose={() => setShowAutoRenameModal(false)}
+        selectedChannelIds={selectedChannels.length > 0 ? selectedChannels.map(c => c.id) : null}
+        onSuccess={() => {
+          setShowAutoRenameModal(false);
+          refresh();
+        }}
+      />
       <Form
         onSubmit={() => {
           searchChannels(
@@ -3796,6 +3850,16 @@ const ChannelsTable = () => {
                       onClick={() => setShowSyncModelsModal(true)}
                     >
                       {t('批量模型同步')}
+                    </Button>
+                  </Dropdown.Item>
+                  <Dropdown.Item>
+                    <Button
+                      theme='light'
+                      type='tertiary'
+                      style={{ width: '100%' }}
+                      onClick={() => setShowAutoRenameModal(true)}
+                    >
+                      {t('自动重命名')}
                     </Button>
                   </Dropdown.Item>
                 </Dropdown.Menu>
@@ -4670,6 +4734,7 @@ const ChannelsTable = () => {
           setRefreshingFailedPreview(false);
           setBatchJobResultsPage(1);
           setBatchJobResultsTotal(0);
+          setShowAllTargetModels(false);
         }}
         footer={
           <div

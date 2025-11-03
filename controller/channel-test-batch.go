@@ -889,3 +889,143 @@ func DeleteFailedModelsByJob(c *gin.Context) {
         },
     })
 }
+
+// RetryJobInBackground 创建后台重试任务，重试原任务中的失败模型
+func RetryJobInBackground(c *gin.Context) {
+    jobID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+    if err != nil || jobID <= 0 {
+        c.JSON(http.StatusBadRequest, gin.H{
+            "success": false,
+            "message": "无效的任务 ID",
+        })
+        return
+    }
+
+    // 获取原任务
+    originalJob, err := model.GetChannelTestJob(jobID)
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("获取原任务失败: %v", err),
+        })
+        return
+    }
+
+    // 检查原任务状态
+    if originalJob.Status == model.ChannelTestJobStatusRunning || originalJob.Status == model.ChannelTestJobStatusPending {
+        c.JSON(http.StatusBadRequest, gin.H{
+            "success": false,
+            "message": "原任务尚未完成，无法执行批量重试",
+        })
+        return
+    }
+
+    // 获取原任务配置
+    originalOptions, err := originalJob.GetOptions()
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("解析原任务配置失败: %v", err),
+        })
+        return
+    }
+
+    // 查询失败模型列表
+    query := model.DB.
+        Where("job_id = ? AND success = ?", jobID, false).
+        Where("(result_status IS NULL OR result_status != ?)", model.ChannelTestResultStatusDeleted)
+
+    var failedResults []model.ChannelTestResult
+    if err := query.Order("id asc").Find(&failedResults).Error; err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("查询失败模型列表时出错: %v", err),
+        })
+        return
+    }
+
+    if len(failedResults) == 0 {
+        c.JSON(http.StatusOK, gin.H{
+            "success": false,
+            "message": "未找到需要重试的失败模型",
+        })
+        return
+    }
+
+    // 提取失败模型的渠道ID和模型名称
+    channelIDSet := make(map[int]struct{})
+    failedModels := make([]string, 0, len(failedResults))
+    seen := make(map[string]struct{})
+
+    for _, result := range failedResults {
+        channelIDSet[result.ChannelID] = struct{}{}
+        if _, ok := seen[result.ModelName]; !ok {
+            failedModels = append(failedModels, result.ModelName)
+            seen[result.ModelName] = struct{}{}
+        }
+    }
+
+    channelIDs := make([]int, 0, len(channelIDSet))
+    for id := range channelIDSet {
+        channelIDs = append(channelIDs, id)
+    }
+
+    // 创建重试任务配置
+    retryOptions := model.DefaultChannelTestJobOptions()
+    retryOptions.ChannelIDs = channelIDs
+    retryOptions.IncludeAll = false
+    retryOptions.IncludeDisabled = originalOptions.IncludeDisabled
+    retryOptions.TestMode = model.ChannelTestJobModeSelected
+    retryOptions.TargetModels = failedModels
+    retryOptions.ParentJobID = jobID
+    retryOptions.IsRetryJob = true
+    retryOptions.UseChannelDefault = false
+    retryOptions.ModelScope = originalOptions.ModelScope
+    retryOptions.ModelWhitelist = originalOptions.ModelWhitelist
+    retryOptions.ModelBlacklist = originalOptions.ModelBlacklist
+
+    // 创建新的重试任务
+    retryJob := &model.ChannelTestJob{
+        RequestedBy: c.GetInt("id"),
+        Concurrency: originalJob.Concurrency,
+        IntervalMs:  originalJob.IntervalMs,
+        RetryLimit:  originalJob.RetryLimit,
+        Status:      model.ChannelTestJobStatusPending,
+    }
+
+    if err := retryJob.SetOptions(retryOptions); err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("保存重试任务配置失败: %v", err),
+        })
+        return
+    }
+
+    if err := model.CreateChannelTestJob(retryJob); err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("创建重试任务失败: %v", err),
+        })
+        return
+    }
+
+    // 提交后台任务
+    if err := channeltest.SubmitJob(retryJob.ID); err != nil {
+        _ = model.FinalizeChannelTestJob(retryJob.ID, model.ChannelTestJobStatusFailed, err.Error())
+        c.JSON(http.StatusInternalServerError, gin.H{
+            "success": false,
+            "message": fmt.Sprintf("重试任务提交失败: %v", err),
+        })
+        return
+    }
+
+    c.JSON(http.StatusOK, gin.H{
+        "success": true,
+        "message": fmt.Sprintf("重试任务已创建，将在后台重试 %d 个失败模型", len(failedModels)),
+        "data": gin.H{
+            "job_id":        retryJob.ID,
+            "parent_job_id": jobID,
+            "retry_count":   len(failedModels),
+        },
+    })
+}
