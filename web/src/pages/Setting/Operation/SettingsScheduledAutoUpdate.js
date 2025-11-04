@@ -16,13 +16,14 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button, Card, Divider, Form, Radio, Space, Spin, Typography } from '@douyinfe/semi-ui';
 import { API, showError, showSuccess } from '../../../helpers';
 import { useTranslation } from 'react-i18next';
 
 const SettingsScheduledAutoUpdate = () => {
   const { t } = useTranslation();
+  const formRef = useRef();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [channels, setChannels] = useState([]);
@@ -106,11 +107,20 @@ const SettingsScheduledAutoUpdate = () => {
     loadSettings();
   }, []);
 
+  useEffect(() => {
+    if (formRef.current) {
+      formRef.current.setValues({
+        ...settings,
+      });
+    }
+  }, [settings]);
+
   const handleSettingChange = (key, value) => {
-    setSettings((prev) => ({
-      ...prev,
+    const nextSettings = {
+      ...settings,
       [key]: value,
-    }));
+    };
+    setSettings(nextSettings);
   };
 
   const channelOptions = channels.map((channel) => ({
@@ -127,11 +137,15 @@ const SettingsScheduledAutoUpdate = () => {
         )}
       </Typography.Paragraph>
 
-      <Form labelPosition='left' labelAlign='left' labelWidth='180px'>
+      <Form
+        labelPosition='left'
+        labelAlign='left'
+        labelWidth='180px'
+        getFormApi={(formAPI) => (formRef.current = formAPI)}
+      >
         <Form.Switch
           field='enabled'
           label={t('启用定时自动更新')}
-          checked={settings.enabled}
           onChange={(value) => handleSettingChange('enabled', value)}
         />
 
@@ -141,7 +155,6 @@ const SettingsScheduledAutoUpdate = () => {
               field='frequency'
               label={t('更新频率（分钟）')}
               labelExtra={t('最小值：5分钟')}
-              value={settings.frequency}
               min={5}
               max={10080}
               step={5}
@@ -155,7 +168,6 @@ const SettingsScheduledAutoUpdate = () => {
             <Form.RadioGroup
               field='mode'
               label={t('更新模式')}
-              value={settings.mode}
               onChange={(value) => {
                 const nextValue =
                   typeof value === 'string' ? value : value?.target?.value || 'incremental';
@@ -188,7 +200,6 @@ const SettingsScheduledAutoUpdate = () => {
               field='enable_auto_rename'
               label={t('启用自动重命名')}
               labelExtra={t('为新增模型自动应用重命名规则')}
-              checked={settings.enable_auto_rename}
               onChange={(value) => handleSettingChange('enable_auto_rename', value)}
             />
 
@@ -197,7 +208,6 @@ const SettingsScheduledAutoUpdate = () => {
                 field='include_vendor'
                 label={t('包含厂商前缀')}
                 labelExtra={t('重命名时是否包含厂商名称前缀')}
-                checked={settings.include_vendor}
                 onChange={(value) => handleSettingChange('include_vendor', value)}
               />
             )}
@@ -207,7 +217,6 @@ const SettingsScheduledAutoUpdate = () => {
               label={t('选择渠道')}
               labelExtra={t('留空表示更新所有已启用的渠道')}
               placeholder={t('留空表示更新所有已启用的渠道')}
-              value={settings.channel_ids}
               onChange={(value) =>
                 handleSettingChange(
                   'channel_ids',
