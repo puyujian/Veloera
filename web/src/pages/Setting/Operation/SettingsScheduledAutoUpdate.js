@@ -54,12 +54,14 @@ const SettingsScheduledAutoUpdate = () => {
       const { success, data, message } = res.data;
       if (success && data) {
         setSettings({
-          enabled: data.enabled || false,
-          frequency: data.frequency || 60,
-          mode: data.mode || 'incremental',
-          enable_auto_rename: data.enable_auto_rename || false,
-          include_vendor: data.include_vendor || false,
-          channel_ids: data.channel_ids || [],
+          enabled: Boolean(data.enabled),
+          frequency: typeof data.frequency === 'number' ? data.frequency : 60,
+          mode: typeof data.mode === 'string' && data.mode ? data.mode : 'incremental',
+          enable_auto_rename: Boolean(data.enable_auto_rename),
+          include_vendor: Boolean(data.include_vendor),
+          channel_ids: Array.isArray(data.channel_ids)
+            ? Array.from(new Set(data.channel_ids.map((id) => Number(id)).filter((id) => id > 0)))
+            : [],
         });
       } else {
         showError(message || t('加载配置失败'));
@@ -74,7 +76,17 @@ const SettingsScheduledAutoUpdate = () => {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      const res = await API.put('/api/channel/scheduled-auto-update/settings', settings);
+      const payload = {
+        enabled: Boolean(settings.enabled),
+        frequency: typeof settings.frequency === 'number' ? settings.frequency : 60,
+        mode: typeof settings.mode === 'string' && settings.mode ? settings.mode : 'incremental',
+        enable_auto_rename: Boolean(settings.enable_auto_rename),
+        include_vendor: Boolean(settings.include_vendor),
+        channel_ids: Array.isArray(settings.channel_ids)
+          ? Array.from(new Set(settings.channel_ids.map((id) => Number(id)).filter((id) => id > 0)))
+          : [],
+      };
+      const res = await API.put('/api/channel/scheduled-auto-update/settings', payload);
       const { success, message } = res.data;
       if (success) {
         showSuccess(t('保存成功'));
@@ -83,7 +95,7 @@ const SettingsScheduledAutoUpdate = () => {
         showError(message || t('保存失败'));
       }
     } catch (error) {
-      showError(t('保存失败') + ': ' + (error.message || ''));
+      showError(t('保存失败') + ': ' + (error.response?.data?.message || error.message || ''));
     } finally {
       setSaving(false);
     }
@@ -144,7 +156,11 @@ const SettingsScheduledAutoUpdate = () => {
               field='mode'
               label={t('更新模式')}
               value={settings.mode}
-              onChange={(value) => handleSettingChange('mode', value)}
+              onChange={(value) => {
+                const nextValue =
+                  typeof value === 'string' ? value : value?.target?.value || 'incremental';
+                handleSettingChange('mode', nextValue);
+              }}
             >
               <Radio value='incremental'>
                 {t('增量模式')}
