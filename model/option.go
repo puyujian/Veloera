@@ -172,6 +172,14 @@ func InitOptionMap() {
 	common.OptionMap["ReverseProxyEnabled"] = "false"
 	common.OptionMap["ReverseProxyProvider"] = "nginx"
 
+	// Add scheduled auto update models configuration
+	common.OptionMap["ScheduledAutoUpdateEnabled"] = "false"
+	common.OptionMap["ScheduledAutoUpdateFrequency"] = "60"
+	common.OptionMap["ScheduledAutoUpdateMode"] = "incremental"
+	common.OptionMap["ScheduledAutoUpdateEnableRename"] = "false"
+	common.OptionMap["ScheduledAutoUpdateIncludeVendor"] = "false"
+	common.OptionMap["ScheduledAutoUpdateChannelIds"] = ""
+
 	// 自动添加所有注册的模型配置
 	modelConfigs := config.GlobalConfig.ExportAllConfigs()
 	for k, v := range modelConfigs {
@@ -451,9 +459,9 @@ func updateOptionMap(key string, value string) (err error) {
 	case "TopUpLink":
 		common.TopUpLink = value
 	//case "ChatLink":
-	//	common.ChatLink = value
+	//    common.ChatLink = value
 	//case "ChatLink2":
-	//	common.ChatLink2 = value
+	//    common.ChatLink2 = value
 	case "ChannelDisableThreshold":
 		common.ChannelDisableThreshold, _ = strconv.ParseFloat(value, 64)
 	case "QuotaPerUnit":

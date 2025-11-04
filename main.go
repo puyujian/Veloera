@@ -23,8 +23,8 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"veloera/common"
 	"veloera/channeltest"
+	"veloera/common"
 	"veloera/constant"
 	"veloera/controller"
 	"veloera/middleware"
@@ -138,6 +138,7 @@ func main() {
 		}
 		go controller.AutomaticallyTestChannels(frequency)
 	}
+	go controller.ScheduledAutoUpdateChannelModels(60)
 	if common.IsMasterNode && constant.UpdateTask {
 		gopool.Go(func() {
 			controller.UpdateMidjourneyTaskBulk()
