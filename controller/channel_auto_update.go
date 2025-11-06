@@ -293,7 +293,7 @@ func processChannelAutoUpdate(ch *model.Channel, updateMode string, enableAutoRe
 	// 5. 如果启用自动重命名且有新增模型，执行重命名
 	if enableAutoRename && len(addedModels) > 0 {
 		// 对新增模型进行重命名处理
-		globalMapping := service.SystemRenameProcessor(addedModels, includeVendor)
+		globalMapping := service.MultiPassSystemRenameProcessor(addedModels, includeVendor)
 		if len(globalMapping) > 0 {
 			// 应用重命名到新增模型
 			renamedNextModels := make([]string, 0, len(nextModels))

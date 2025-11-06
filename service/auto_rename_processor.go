@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"veloera/common"
 	"veloera/dto"
@@ -54,6 +55,77 @@ func SystemRenameProcessor(models []string, includeVendor bool) map[string]strin
 	}
 
 	return result
+}
+
+// MultiPassSystemRenameProcessor 多轮系统规则处理器
+// 对每个模型进行迭代重命名直到稳定，确保一次处理到位
+func MultiPassSystemRenameProcessor(models []string, includeVendor bool) map[string]string {
+	const maxPasses = 10
+
+	vendorManager := GetVendorRuleManager()
+	vendorRules := vendorManager.GetRules()
+	dateSuffixRe := regexp.MustCompile(`-\d{8}$`)
+
+	originToFinal := make(map[string]string)
+	seenOriginals := make(map[string]struct{})
+
+	for _, raw := range models {
+		original := strings.TrimSpace(raw)
+		if original == "" {
+			continue
+		}
+		if _, exists := seenOriginals[original]; exists {
+			continue
+		}
+		seenOriginals[original] = struct{}{}
+
+		current := original
+		visited := map[string]struct{}{current: {}}
+
+		for pass := 0; pass < maxPasses; pass++ {
+			renamed := renameModel(current, vendorRules, dateSuffixRe, includeVendor)
+			renamed = strings.TrimSpace(renamed)
+
+			if renamed == "" || renamed == current {
+				break
+			}
+
+			if _, loop := visited[renamed]; loop {
+				current = renamed
+				break
+			}
+
+			visited[renamed] = struct{}{}
+			current = renamed
+		}
+
+		if current != original {
+			originToFinal[original] = current
+		}
+	}
+
+	if len(originToFinal) == 0 {
+		return map[string]string{}
+	}
+
+	origins := make([]string, 0, len(originToFinal))
+	for orig := range originToFinal {
+		origins = append(origins, orig)
+	}
+	sort.Strings(origins)
+
+	finalMapping := make(map[string]string, len(originToFinal))
+	for _, orig := range origins {
+		finalName := originToFinal[orig]
+		if finalName == "" {
+			continue
+		}
+		if _, exists := finalMapping[finalName]; !exists {
+			finalMapping[finalName] = orig
+		}
+	}
+
+	return finalMapping
 }
 
 // renameModel 重命名单个模型（使用动态厂商规则和标准化名称）
