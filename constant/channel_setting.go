@@ -22,4 +22,5 @@ var (
 	ChannelSettingThinkingToContent = "thinking_to_content" // ThinkingToContent
 	ChannelSettingStreamSupport     = "stream_support"      // StreamSupport 控制上游流式请求行为
 	StreamSupportNonStreamOnly      = "NON_STREAM_ONLY"     // StreamSupport 仅非流式请求
+	ChannelSettingPassThrough       = "pass_through"        // PassThrough 单渠道透传开关
 )
