@@ -131,26 +131,54 @@ func MultiPassSystemRenameProcessor(models []string, includeVendor bool) map[str
 
 var (
 	vendorNameAliases = map[string]string{
-		"deepseek":       "DeepSeek",
-		"deepseek-ai":    "DeepSeek",
-		"deepseek ai":    "DeepSeek",
-		"iflowcn":        "DeepSeek",
-		"阿里巴巴":           "DeepSeek",
-		"wandb":          "DeepSeek",
-		"mistral":        "MistralAI",
-		"mistralai":      "MistralAI",
-		"mistral ai":     "MistralAI",
-		"cloudflare":     "MistralAI",
-		"scaleway":       "MistralAI",
-		"moonshot":       "Moonshot",
-		"moonshotai":     "Moonshot",
-		"moonshot ai":    "Moonshot",
-		"cortecs":        "Moonshot",
-		"kimi":           "Moonshot",
-		"aihubmix":       "Google",
-		"hyb-optimal":    "Google",
-		"hyb optimal":    "Google",
-		"google":         "Google",
+		// DeepSeek 系列
+		"deepseek":    "DeepSeek",
+		"deepseek-ai": "DeepSeek",
+		"deepseek ai": "DeepSeek",
+		"iflowcn":     "DeepSeek",
+		"wandb":       "DeepSeek",
+		// MistralAI 系列
+		"mistral":    "MistralAI",
+		"mistralai":  "MistralAI",
+		"mistral ai": "MistralAI",
+		"cloudflare": "MistralAI",
+		"scaleway":   "MistralAI",
+		// Moonshot 系列
+		"moonshot":    "Moonshot",
+		"moonshotai":  "Moonshot",
+		"moonshot ai": "Moonshot",
+		"cortecs":     "Moonshot",
+		"kimi":        "Moonshot",
+		// Google 系列
+		"aihubmix":    "Google",
+		"hyb-optimal": "Google",
+		"hyb optimal": "Google",
+		"google":      "Google",
+		// 阿里巴巴系列
+		"alibaba":    "阿里巴巴",
+		"alibaba-cn": "通义千问",
+		"qwen":       "阿里巴巴",
+		"iic":        "阿里巴巴",
+		"musepublic": "阿里巴巴",
+		// 百度系列
+		"baidu":       "百度",
+		"paddlepaddle": "百度",
+		// 智谱系列
+		"zhipu":   "智谱",
+		"zhipuai": "智谱",
+		"bigmodel": "智谱",
+		// MiniMax 系列
+		"minimax": "MiniMax",
+		// 商汤/上海AI实验室系列
+		"opengvlab":               "上海AI实验室",
+		"shanghai_ai_laboratory":  "上海AI实验室",
+		"shanghai ai laboratory":  "上海AI实验室",
+		"opencompass":             "上海AI实验室",
+		// 阶跃星辰系列
+		"stepfun":    "阶跃星辰",
+		"stepfun-ai": "阶跃星辰",
+		"stepfun ai": "阶跃星辰",
+		// 其他
 		"github copilot": "GitHub",
 		"anthropic":      "Anthropic",
 		"openai":         "OpenAI",
