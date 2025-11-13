@@ -70,12 +70,12 @@ func getAndValidImageRequest(c *gin.Context, info *relaycommon.RelayInfo) (*dto.
 			imageRequest.Quality = "standard"
 		}
 		//if imageRequest.N != 1 {
-		//	return nil, errors.New("n must be 1")
+		//    return nil, errors.New("n must be 1")
 		//}
 	}
 	// N should between 1 and 10
 	//if imageRequest.N != 0 && (imageRequest.N < 1 || imageRequest.N > 10) {
-	//	return service.OpenAIErrorWrapper(errors.New("n must be between 1 and 10"), "invalid_field_value", http.StatusBadRequest)
+	//    return service.OpenAIErrorWrapper(errors.New("n must be between 1 and 10"), "invalid_field_value", http.StatusBadRequest)
 	//}
 	tokenGroup := c.GetString("token_group")
 	if setting.ShouldCheckPromptSensitiveWithGroup(tokenGroup) {
@@ -155,16 +155,24 @@ func ImageHelper(c *gin.Context) *dto.OpenAIErrorWithStatusCode {
 
 	var requestBody io.Reader
 
-	convertedRequest, err := adaptor.ConvertImageRequest(c, relayInfo, *imageRequest)
-	if err != nil {
-		return service.OpenAIErrorWrapperLocal(err, "convert_request_failed", http.StatusInternalServerError)
-	}
+	if shouldUsePassThrough(adaptor, relayInfo) {
+		body, err := common.GetRequestBody(c)
+		if err != nil {
+			return service.OpenAIErrorWrapperLocal(err, "get_request_body_failed", http.StatusInternalServerError)
+		}
+		requestBody = bytes.NewBuffer(body)
+	} else {
+		convertedRequest, err := adaptor.ConvertImageRequest(c, relayInfo, *imageRequest)
+		if err != nil {
+			return service.OpenAIErrorWrapperLocal(err, "convert_request_failed", http.StatusInternalServerError)
+		}
 
-	jsonData, err := json.Marshal(convertedRequest)
-	if err != nil {
-		return service.OpenAIErrorWrapperLocal(err, "json_marshal_failed", http.StatusInternalServerError)
+		jsonData, err := json.Marshal(convertedRequest)
+		if err != nil {
+			return service.OpenAIErrorWrapperLocal(err, "json_marshal_failed", http.StatusInternalServerError)
+		}
+		requestBody = bytes.NewBuffer(jsonData)
 	}
-	requestBody = bytes.NewBuffer(jsonData)
 
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
