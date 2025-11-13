@@ -141,18 +141,75 @@ func (m *VendorRuleManager) LoadRules() error {
 		return fmt.Errorf("解析远程元数据失败: %w", err)
 	}
 
+	// 去重模型元数据（统一大小写不一致的模型）
+	deduplicatedModels := m.deduplicateModels(response.Models)
+
 	// 构建规则
-	rules := m.buildRulesFromMetadata(response.Models)
+	rules := m.buildRulesFromMetadata(deduplicatedModels)
 
 	// 更新规则和元数据
 	m.mutex.Lock()
 	m.rules = rules
-	m.modelMetadata = response.Models
+	m.modelMetadata = deduplicatedModels
 	m.lastUpdate = time.Now()
 	m.mutex.Unlock()
 
-	common.SysLog(fmt.Sprintf("成功加载 %d 个厂商规则和 %d 个模型元数据", len(rules), len(response.Models)))
+	common.SysLog(fmt.Sprintf("成功加载 %d 个厂商规则和 %d 个模型元数据", len(rules), len(deduplicatedModels)))
 	return nil
+}
+
+// deduplicateModels 去重模型元数据（统一大小写不一致的模型）
+func (m *VendorRuleManager) deduplicateModels(models []ModelMetadata) []ModelMetadata {
+	// 使用 map 按小写 ID 去重
+	modelMap := make(map[string]ModelMetadata)
+
+	for _, model := range models {
+		if model.ID == "" {
+			continue
+		}
+
+		lowerID := strings.ToLower(model.ID)
+
+		// 如果已存在，选择更标准的版本
+		if existing, exists := modelMap[lowerID]; exists {
+			// 优先保留首字母大写的版本（官方格式通常是首字母大写）
+			if isPreferredCase(model.ID, existing.ID) {
+				modelMap[lowerID] = model
+			}
+			// 否则保留原有的
+		} else {
+			modelMap[lowerID] = model
+		}
+	}
+
+	// 转换回切片
+	result := make([]ModelMetadata, 0, len(modelMap))
+	for _, model := range modelMap {
+		result = append(result, model)
+	}
+
+	return result
+}
+
+// isPreferredCase 判断新ID是否比旧ID更标准（优先首字母大写格式）
+func isPreferredCase(newID, oldID string) bool {
+	// 如果新ID首字母大写，旧ID首字母小写，则新ID更优
+	if len(newID) > 0 && len(oldID) > 0 {
+		newFirstUpper := newID[0] >= 'A' && newID[0] <= 'Z'
+		oldFirstUpper := oldID[0] >= 'A' && oldID[0] <= 'Z'
+
+		// 新ID大写，旧ID小写 → 选新的
+		if newFirstUpper && !oldFirstUpper {
+			return true
+		}
+		// 新ID小写，旧ID大写 → 保留旧的
+		if !newFirstUpper && oldFirstUpper {
+			return false
+		}
+	}
+
+	// 其他情况：保留原有的（返回false）
+	return false
 }
 
 // buildRulesFromMetadata 从模型元数据构建厂商规则
@@ -260,8 +317,8 @@ func (m *VendorRuleManager) FindStandardModelName(cleanedModelName string) (stri
 
 	cleanedModelName = strings.ToLower(strings.TrimSpace(cleanedModelName))
 
-	// 日期后缀正则
-	dateSuffixRe := regexp.MustCompile(`-\d{8}$`)
+	// 日期后缀正则（支持4-8位数字：-0528, -202405, -20240528）
+	dateSuffixRe := regexp.MustCompile(`-\d{4,8}$`)
 
 	// 策略1: 精确匹配
 	for _, metadata := range m.modelMetadata {
@@ -299,8 +356,8 @@ func (m *VendorRuleManager) FindStandardModelName(cleanedModelName string) (stri
 
 // isFuzzyMatch 模糊匹配逻辑
 func (m *VendorRuleManager) isFuzzyMatch(input, standard string) bool {
-	// 去除日期后缀
-	dateSuffixRe := regexp.MustCompile(`-\d{8}$`)
+	// 去除日期后缀（支持4-8位数字：-0528, -202405, -20240528）
+	dateSuffixRe := regexp.MustCompile(`-\d{4,8}$`)
 	input = dateSuffixRe.ReplaceAllString(input, "")
 	standard = dateSuffixRe.ReplaceAllString(standard, "")
 

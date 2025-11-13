@@ -1,0 +1,10 @@
+claude-sonnet-4
+claude-sonnet-4-think
+claude-sonnet-4.5
+hyb-Optimal/gemini抗截断系列/gemini-2.5-flash
+hyb-Optimal/GCP/gemini-2.5-flash
+deepseek/deepseek-r1-0528-qwen3-8b
+deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
+Qwen/Qwen3-235B-A22B-Instruct-2507
+moonshotai/kimi-k2-instruct-0905
+THUDM/GLM-Z1-9B-0414

@@ -38,8 +38,8 @@ func SystemRenameProcessor(models []string, includeVendor bool) map[string]strin
 	vendorManager := GetVendorRuleManager()
 	vendorRules := vendorManager.GetRules()
 
-	// 日期后缀正则
-	dateSuffixRe := regexp.MustCompile(`-\d{8}$`)
+	// 日期后缀正则（支持4-8位数字：-0528, -202405, -20240528）
+	dateSuffixRe := regexp.MustCompile(`-\d{4,8}$`)
 
 	for _, model := range models {
 		model = strings.TrimSpace(model)
