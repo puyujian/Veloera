@@ -140,12 +140,15 @@ func SetApiRouter(router *gin.Engine) {
 			// v2 并发预览版同步 + 应用保存
 			channelRoute.POST("/models/sync", controller.SyncChannelModelsV2)
 			channelRoute.POST("/models/apply", controller.ApplyChannelModelSync)
+			channelRoute.POST("/models/auto-update", controller.AutoUpdateChannelModels)
 			// 自动重命名
 			channelRoute.POST("/auto-rename/generate", controller.GenerateAutoRename)
 			channelRoute.POST("/auto-rename/apply", controller.ApplyAutoRename)
 			channelRoute.POST("/auto-rename/undo", controller.UndoAutoRename)
 			channelRoute.GET("/auto-rename/snapshots", controller.ListAutoRenameSnapshots)
 			channelRoute.POST("/batch/tag", controller.BatchSetChannelTag)
+			channelRoute.GET("/scheduled-auto-update/settings", controller.GetScheduledAutoUpdateSettings)
+			channelRoute.PUT("/scheduled-auto-update/settings", controller.UpdateScheduledAutoUpdateSettings)
 		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())

@@ -53,10 +53,10 @@ type VendorRule struct {
 
 // VendorRuleManager 厂商规则管理器
 type VendorRuleManager struct {
-	rules          []*VendorRule
-	modelMetadata  []ModelMetadata // 缓存的模型元数据
-	mutex          sync.RWMutex
-	lastUpdate     time.Time
+	rules         []*VendorRule
+	modelMetadata []ModelMetadata // 缓存的模型元数据
+	mutex         sync.RWMutex
+	lastUpdate    time.Time
 }
 
 var (
@@ -66,36 +66,36 @@ var (
 
 // providerDisplayNames providerId 到显示名称的映射
 var providerDisplayNames = map[string]string{
-	"anthropic":               "Anthropic",
-	"openai":                  "OpenAI",
-	"google":                  "Google",
-	"alibaba":                 "阿里巴巴",
-	"alibaba-cn":              "通义千问",
-	"doubao":                  "豆包",
-	"moonshot":                "Moonshot",
-	"deepseek":                "DeepSeek",
-	"zhipu":                   "智谱",
-	"tencent":                 "腾讯",
-	"baidu":                   "百度",
-	"minimax":                 "MiniMax",
-	"mistral":                 "MistralAI",
-	"xai":                     "xAI",
-	"meta":                    "Meta",
-	"amazon-bedrock":          "Amazon Bedrock",
-	"azure":                   "Azure",
-	"cloudflare-workers-ai":   "Cloudflare",
-	"cerebras":                "Cerebras",
-	"deepinfra":               "DeepInfra",
-	"fireworks-ai":            "Fireworks AI",
-	"github-models":           "GitHub Models",
-	"huggingface":             "Hugging Face",
-	"together-ai":             "Together AI",
-	"groq":                    "Groq",
-	"perplexity":              "Perplexity",
-	"cohere":                  "Cohere",
-	"ai21":                    "AI21 Labs",
-	"stability-ai":            "Stability AI",
-	"replicate":               "Replicate",
+	"anthropic":             "Anthropic",
+	"openai":                "OpenAI",
+	"google":                "Google",
+	"alibaba":               "阿里巴巴",
+	"alibaba-cn":            "通义千问",
+	"doubao":                "豆包",
+	"moonshot":              "Moonshot",
+	"deepseek":              "DeepSeek",
+	"zhipu":                 "智谱",
+	"tencent":               "腾讯",
+	"baidu":                 "百度",
+	"minimax":               "MiniMax",
+	"mistral":               "MistralAI",
+	"xai":                   "xAI",
+	"meta":                  "Meta",
+	"amazon-bedrock":        "Amazon Bedrock",
+	"azure":                 "Azure",
+	"cloudflare-workers-ai": "Cloudflare",
+	"cerebras":              "Cerebras",
+	"deepinfra":             "DeepInfra",
+	"fireworks-ai":          "Fireworks AI",
+	"github-models":         "GitHub Models",
+	"huggingface":           "Hugging Face",
+	"together-ai":           "Together AI",
+	"groq":                  "Groq",
+	"perplexity":            "Perplexity",
+	"cohere":                "Cohere",
+	"ai21":                  "AI21 Labs",
+	"stability-ai":          "Stability AI",
+	"replicate":             "Replicate",
 }
 
 // GetVendorRuleManager 获取全局厂商规则管理器（单例）
@@ -464,11 +464,27 @@ func (m *VendorRuleManager) loadDefaultRules() {
 		{ID: "gpt-3.5-turbo", Name: "GPT-3.5 Turbo", ProviderID: "openai"},
 		// Google Gemini 系列
 		{ID: "gemini-2.0-flash-exp", Name: "Gemini 2.0 Flash", ProviderID: "google"},
+		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ProviderID: "google"},
+		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ProviderID: "google"},
 		{ID: "gemini-1.5-pro", Name: "Gemini 1.5 Pro", ProviderID: "google"},
 		{ID: "gemini-1.5-flash", Name: "Gemini 1.5 Flash", ProviderID: "google"},
 		// DeepSeek 系列
 		{ID: "deepseek-chat", Name: "DeepSeek Chat", ProviderID: "deepseek"},
 		{ID: "deepseek-reasoner", Name: "DeepSeek Reasoner", ProviderID: "deepseek"},
+		{ID: "deepseek-r1", Name: "DeepSeek R1", ProviderID: "deepseek"},
+		{ID: "deepseek-v3", Name: "DeepSeek V3", ProviderID: "deepseek"},
+		{ID: "deepseek-v3.1", Name: "DeepSeek V3.1", ProviderID: "deepseek"},
+		// Moonshot 系列
+		{ID: "moonshot-v1-8k", Name: "Moonshot v1 8K", ProviderID: "moonshot"},
+		{ID: "moonshot-v1-32k", Name: "Moonshot v1 32K", ProviderID: "moonshot"},
+		{ID: "moonshot-v1-128k", Name: "Moonshot v1 128K", ProviderID: "moonshot"},
+		{ID: "kimi-k1-instruct", Name: "Kimi K1 Instruct", ProviderID: "moonshot"},
+		{ID: "kimi-k2-instruct", Name: "Kimi K2 Instruct", ProviderID: "moonshot"},
+		// MistralAI 系列
+		{ID: "mistral-large", Name: "Mistral Large", ProviderID: "mistral"},
+		{ID: "mistral-medium", Name: "Mistral Medium", ProviderID: "mistral"},
+		{ID: "mistral-small", Name: "Mistral Small", ProviderID: "mistral"},
+		{ID: "mistral-small-3.1-24b-instruct", Name: "Mistral Small 3.1 24B Instruct", ProviderID: "mistral"},
 	}
 
 	m.mutex.Lock()

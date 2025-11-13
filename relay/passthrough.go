@@ -17,6 +17,9 @@
 package relay
 
 import (
+	"strings"
+
+	"veloera/constant"
 	relaycommon "veloera/relay/common"
 	"veloera/setting/model_setting"
 )
@@ -25,13 +28,30 @@ type openAIPassThroughSupport interface {
 	SupportsOpenAIPassThrough(*relaycommon.RelayInfo) bool
 }
 
-// shouldUsePassThrough checks the global toggle and lets adaptors opt out when the upstream API is not OpenAI-compatible.
+// shouldUsePassThrough checks the channel-level toggle first, then falls back to the global toggle.
+// It also lets adaptors opt out when the upstream API is not OpenAI-compatible.
 func shouldUsePassThrough(adaptor interface{}, info *relaycommon.RelayInfo) bool {
-	if !model_setting.GetGlobalSettings().PassThroughRequestEnabled {
+	if adaptor == nil {
 		return false
 	}
 
-	if adaptor == nil {
+	// Check channel-level pass-through setting first
+	if info != nil {
+		if enable, ok := extractPassThroughSetting(info.ChannelSetting); ok {
+			// Channel-level setting exists, use it
+			if !enable {
+				return false
+			}
+			// Channel-level pass-through is enabled, check if adaptor supports it
+			if support, ok := adaptor.(openAIPassThroughSupport); ok {
+				return support.SupportsOpenAIPassThrough(info)
+			}
+			return true
+		}
+	}
+
+	// Fall back to global setting
+	if !model_setting.GetGlobalSettings().PassThroughRequestEnabled {
 		return false
 	}
 
@@ -40,4 +60,31 @@ func shouldUsePassThrough(adaptor interface{}, info *relaycommon.RelayInfo) bool
 	}
 
 	return true
+}
+
+// extractPassThroughSetting extracts the pass_through setting from channel setting map
+func extractPassThroughSetting(setting map[string]interface{}) (bool, bool) {
+	if setting == nil {
+		return false, false
+	}
+
+	value, exists := setting[constant.ChannelSettingPassThrough]
+	if !exists {
+		return false, false
+	}
+
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		lower := strings.ToLower(strings.TrimSpace(v))
+		if lower == "true" || lower == "1" || lower == "yes" || lower == "on" {
+			return true, true
+		}
+		if lower == "false" || lower == "0" || lower == "no" || lower == "off" {
+			return false, true
+		}
+	}
+
+	return false, false
 }

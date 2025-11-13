@@ -113,7 +113,7 @@ func GenerateAutoRename(c *gin.Context) {
 	// 调用处理器
 	var globalMapping map[string]string
 	if req.Mode == "system" {
-		globalMapping = service.SystemRenameProcessor(uniqueModels, req.IncludeVendor)
+		globalMapping = service.MultiPassSystemRenameProcessor(uniqueModels, req.IncludeVendor)
 	} else if req.Mode == "ai" {
 		globalMapping, err = service.AIRenameProcessor(uniqueModels, req.AIModel, req.Prompt)
 		if err != nil {

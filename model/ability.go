@@ -26,6 +26,7 @@ import (
 
 	"github.com/samber/lo"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Ability struct {
@@ -376,7 +377,14 @@ func (channel *Channel) AddAbilities() error {
 		return nil
 	}
 	for _, chunk := range lo.Chunk(abilities, 50) {
-		err := DB.Create(&chunk).Error
+		err := DB.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "group"},
+				{Name: "model"},
+				{Name: "channel_id"},
+			},
+			DoUpdates: clause.AssignmentColumns([]string{"enabled", "priority", "weight", "tag"}),
+		}).Create(&chunk).Error
 		if err != nil {
 			return err
 		}
@@ -480,7 +488,15 @@ func (channel *Channel) UpdateAbilities(tx *gorm.DB) error {
 
 	if len(abilities) > 0 {
 		for _, chunk := range lo.Chunk(abilities, 50) {
-			err = tx.Create(&chunk).Error
+			// 使用 Clauses 处理主键冲突，避免重复插入错误
+			err = tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{
+					{Name: "group"},
+					{Name: "model"},
+					{Name: "channel_id"},
+				},
+				DoUpdates: clause.AssignmentColumns([]string{"enabled", "priority", "weight", "tag"}),
+			}).Create(&chunk).Error
 			if err != nil {
 				if isNewTx {
 					tx.Rollback()

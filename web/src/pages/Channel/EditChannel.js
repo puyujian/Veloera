@@ -1961,6 +1961,54 @@ const updateModelsCallback = useCallback((newModels) => {
             <div style={{ marginTop: 10 }}>
               <Typography.Text strong>{t('渠道额外设置')}：</Typography.Text>
             </div>
+            <div style={{ marginTop: 8, marginBottom: 12 }}>
+              <Space align='start'>
+                <Checkbox
+                  checked={(() => {
+                    try {
+                      if (!inputs.setting || inputs.setting.trim() === '') return false;
+                      const settingObj = JSON.parse(inputs.setting);
+                      return settingObj.pass_through === true;
+                    } catch (e) {
+                      return false;
+                    }
+                  })()}
+                  onChange={(checked) => {
+                    try {
+                      let settingObj = {};
+                      if (inputs.setting && inputs.setting.trim() !== '') {
+                        try {
+                          settingObj = JSON.parse(inputs.setting);
+                        } catch (parseError) {
+                          console.error('Failed to parse setting:', parseError);
+                          showError(t('渠道额外设置不是有效的 JSON，无法更新透传开关'));
+                          return;
+                        }
+                      }
+                      if (checked) {
+                        settingObj.pass_through = true;
+                      } else {
+                        delete settingObj.pass_through;
+                      }
+                      handleInputChange(
+                        'setting',
+                        Object.keys(settingObj).length > 0 ? JSON.stringify(settingObj, null, 2) : ''
+                      );
+                    } catch (error) {
+                      console.error('Error updating pass_through:', error);
+                      showError(t('更新设置失败'));
+                    }
+                  }}
+                />
+                <div>
+                  <Typography.Text strong>{t('开启单渠道透传')}</Typography.Text>
+                  <br />
+                  <Typography.Text type='tertiary' style={{ fontSize: 12 }}>
+                    {t('开启后，该渠道的请求将直接透传给上游，不进行额外处理（需上游API兼容OpenAI格式）')}
+                  </Typography.Text>
+                </div>
+              </Space>
+            </div>
             <TextArea
               placeholder={
                 t(

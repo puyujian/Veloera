@@ -24,7 +24,9 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 	"veloera/common"
 	"veloera/dto"
 	"veloera/model"
@@ -56,94 +58,213 @@ func SystemRenameProcessor(models []string, includeVendor bool) map[string]strin
 	return result
 }
 
+// MultiPassSystemRenameProcessor 多轮系统规则处理器
+// 对每个模型进行迭代重命名直到稳定，确保一次处理到位
+func MultiPassSystemRenameProcessor(models []string, includeVendor bool) map[string]string {
+	const maxPasses = 10
+
+	vendorManager := GetVendorRuleManager()
+	vendorRules := vendorManager.GetRules()
+	dateSuffixRe := regexp.MustCompile(`-\d{8}$`)
+
+	originToFinal := make(map[string]string)
+	seenOriginals := make(map[string]struct{})
+
+	for _, raw := range models {
+		original := strings.TrimSpace(raw)
+		if original == "" {
+			continue
+		}
+		if _, exists := seenOriginals[original]; exists {
+			continue
+		}
+		seenOriginals[original] = struct{}{}
+
+		current := original
+		visited := map[string]struct{}{current: {}}
+
+		for pass := 0; pass < maxPasses; pass++ {
+			renamed := renameModel(current, vendorRules, dateSuffixRe, includeVendor)
+			renamed = strings.TrimSpace(renamed)
+
+			if renamed == "" || renamed == current {
+				break
+			}
+
+			if _, loop := visited[renamed]; loop {
+				current = renamed
+				break
+			}
+
+			visited[renamed] = struct{}{}
+			current = renamed
+		}
+
+		if current != original {
+			originToFinal[original] = current
+		}
+	}
+
+	if len(originToFinal) == 0 {
+		return map[string]string{}
+	}
+
+	origins := make([]string, 0, len(originToFinal))
+	for orig := range originToFinal {
+		origins = append(origins, orig)
+	}
+	sort.Strings(origins)
+
+	finalMapping := make(map[string]string, len(originToFinal))
+	for _, orig := range origins {
+		finalName := originToFinal[orig]
+		if finalName == "" {
+			continue
+		}
+		if _, exists := finalMapping[finalName]; !exists {
+			finalMapping[finalName] = orig
+		}
+	}
+
+	return finalMapping
+}
+
+var (
+	vendorNameAliases = map[string]string{
+		"deepseek":       "DeepSeek",
+		"deepseek-ai":    "DeepSeek",
+		"deepseek ai":    "DeepSeek",
+		"iflowcn":        "DeepSeek",
+		"阿里巴巴":           "DeepSeek",
+		"wandb":          "DeepSeek",
+		"mistral":        "MistralAI",
+		"mistralai":      "MistralAI",
+		"mistral ai":     "MistralAI",
+		"cloudflare":     "MistralAI",
+		"scaleway":       "MistralAI",
+		"moonshot":       "Moonshot",
+		"moonshotai":     "Moonshot",
+		"moonshot ai":    "Moonshot",
+		"cortecs":        "Moonshot",
+		"kimi":           "Moonshot",
+		"aihubmix":       "Google",
+		"hyb-optimal":    "Google",
+		"hyb optimal":    "Google",
+		"google":         "Google",
+		"github copilot": "GitHub",
+		"anthropic":      "Anthropic",
+		"openai":         "OpenAI",
+		"xai":            "xAI",
+		"meta":           "Meta",
+	}
+	vendorNameReplacer = strings.NewReplacer("-", " ", "_", " ", "/", " ")
+)
+
 // renameModel 重命名单个模型（使用动态厂商规则和标准化名称）
 func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.Regexp, includeVendor bool) string {
 	model = strings.TrimSpace(model)
+	if model == "" {
+		return model
+	}
 
-	// 0.0 对于未勾选厂商前缀且已符合标准格式的模型名称直接返回原值
 	if !includeVendor && isStandardStandaloneName(model) {
 		return model
 	}
 
-	// 1. 检查是否已经是标准 owner/model 格式
-	//    仅在需要保留厂商前缀（includeVendor=true）时，保持现有格式直接返回
-	if includeVendor {
-		if slashCount := strings.Count(model, "/"); slashCount == 1 && !strings.Contains(model, ":") {
-			parts := strings.Split(model, "/")
-			if len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != "" {
-				// 排除特殊前缀情况（如 BigModel/ 开头）
-				if parts[0] != "BigModel" && !strings.HasPrefix(model, "Pro/") {
-					// 已经是标准格式且需要保留厂商前缀，直接返回
-					return model
-				}
-			}
-		}
+	originalModel := model
+	originalVendor := ""
+	if idx := strings.Index(model, "/"); idx >= 0 {
+		originalVendor = strings.TrimSpace(model[:idx])
 	}
 
-	// 2. 处理特殊前缀（如 BigModel/GLM-4.5 → GLM-4.5）
 	model = strings.TrimPrefix(model, "BigModel/")
 
-	// 3. 提取真实模型名（去除 owner/ 前缀）
-	//    对于包含 '/' 的非标准格式模型名，提取最后一个 '/' 后面的部分
-	//    例如：deepseek/deepseek-r1-0528-qwen3-8b:free → deepseek-r1-0528-qwen3-8b:free
 	actualModel := model
 	if strings.Contains(model, "/") {
 		if idx := strings.LastIndex(model, "/"); idx >= 0 {
-			actualModel = model[idx+1:] // 取最后一个 / 后面的部分作为真实模型名
+			actualModel = model[idx+1:]
 		}
 	}
-
-	// 4. 移除冒号后缀（如 :free、:extended 等）
-	if idx := strings.Index(actualModel, ":"); idx >= 0 {
-		actualModel = actualModel[:idx]
+	actualModel = strings.TrimSpace(actualModel)
+	if actualModel == "" {
+		return strings.TrimSpace(originalModel)
 	}
 
-	// 5. 移除日期后缀
-	actualModel = dateSuffixRe.ReplaceAllString(actualModel, "")
+	if idx := strings.Index(actualModel, ":"); idx >= 0 {
+		actualModel = strings.TrimSpace(actualModel[:idx])
+	}
+	actualModel = strings.TrimSpace(dateSuffixRe.ReplaceAllString(actualModel, ""))
+	if actualModel == "" {
+		return strings.TrimSpace(originalModel)
+	}
 
-	// 6. 尝试在元数据中查找标准化名称
+	normalizedOriginalVendor := normalizeVendorName(originalVendor, vendorRules)
+
 	vendorManager := GetVendorRuleManager()
 	standardName, vendorName, found := vendorManager.FindStandardModelName(actualModel)
 
 	if found {
-		// 找到标准化名称，使用标准名称
-		// 如果标准名称本身包含 '/'（如 deepseek-ai/DeepSeek-V3.1），需要根据 includeVendor 决定是否保留厂商部分
-		if strings.Contains(standardName, "/") {
-			// 标准名称本身就包含厂商前缀
-			if includeVendor {
-				// 需要厂商前缀，直接返回标准名称
-				return standardName
-			} else {
-				// 不需要厂商前缀，只取模型名部分（最后一个 / 后面的部分）
-				if idx := strings.LastIndex(standardName, "/"); idx >= 0 {
-					return standardName[idx+1:]
+		cleanedStandard := strings.TrimSpace(standardName)
+		normalizedStandardVendor := normalizeVendorName(vendorName, vendorRules)
+
+		if strings.Contains(cleanedStandard, "/") {
+			if idx := strings.LastIndex(cleanedStandard, "/"); idx >= 0 {
+				modelPart := strings.TrimSpace(cleanedStandard[idx+1:])
+				if includeVendor {
+					preferredVendor := normalizedOriginalVendor
+					if preferredVendor == "" {
+						preferredVendor = normalizedStandardVendor
+					}
+					if preferredVendor == "" {
+						vendorPart := strings.TrimSpace(cleanedStandard[:idx])
+						preferredVendor = normalizeVendorName(vendorPart, vendorRules)
+					}
+					if preferredVendor != "" && modelPart != "" {
+						return preferredVendor + "/" + modelPart
+					}
+					return cleanedStandard
 				}
-				return standardName
+				if modelPart != "" {
+					return modelPart
+				}
 			}
-		} else {
-			// 标准名称不包含厂商前缀
-			if includeVendor && vendorName != "" {
-				return vendorName + "/" + standardName
+			return actualModel
+		}
+
+		if includeVendor {
+			preferredVendor := normalizedOriginalVendor
+			if preferredVendor == "" {
+				preferredVendor = normalizedStandardVendor
 			}
-			return standardName
+			if preferredVendor != "" {
+				return preferredVendor + "/" + cleanedStandard
+			}
+		}
+
+		if cleanedStandard != "" {
+			return cleanedStandard
+		}
+		return actualModel
+	}
+
+	if includeVendor {
+		vendor := normalizedOriginalVendor
+		if vendor == "" {
+			for _, rule := range vendorRules {
+				if rule.Pattern.MatchString(actualModel) {
+					vendor = normalizeVendorName(rule.DisplayName, vendorRules)
+					if vendor == "" {
+						vendor = rule.DisplayName
+					}
+					break
+				}
+			}
+		}
+		if vendor != "" {
+			return vendor + "/" + actualModel
 		}
 	}
 
-	// 7. 未找到标准化名称，使用传统逻辑识别厂商
-	vendor := ""
-	for _, rule := range vendorRules {
-		if rule.Pattern.MatchString(actualModel) {
-			vendor = rule.DisplayName
-			break
-		}
-	}
-
-	// 8. 组合最终名称
-	if includeVendor && vendor != "" {
-		return vendor + "/" + actualModel
-	}
-
-	// 不包含厂商或未识别到厂商，返回清理后的名称
 	return actualModel
 }
 
@@ -292,6 +413,41 @@ func isStandardStandaloneName(name string) bool {
 		return false
 	}
 	return true
+}
+
+// normalizeVendorName 标准化厂商名称
+// 例如: deepseek → DeepSeek, mistralai → MistralAI, moonshotai → Moonshot
+func normalizeVendorName(vendor string, vendorRules []*VendorRule) string {
+	vendor = strings.TrimSpace(vendor)
+	if vendor == "" {
+		return ""
+	}
+
+	vendorLower := strings.ToLower(vendor)
+	vendorNorm := strings.ToLower(vendorNameReplacer.Replace(vendor))
+
+	if normalized, exists := vendorNameAliases[vendorLower]; exists {
+		return normalized
+	}
+
+	if normalized, exists := vendorNameAliases[vendorNorm]; exists {
+		return normalized
+	}
+
+	for _, rule := range vendorRules {
+		if strings.EqualFold(vendor, strings.ToLower(rule.DisplayName)) {
+			return rule.DisplayName
+		}
+		if strings.EqualFold(vendor, strings.ToLower(rule.ProviderID)) {
+			return rule.DisplayName
+		}
+	}
+
+	if len(vendor) > 0 && unicode.IsLower(rune(vendor[0])) {
+		return strings.ToUpper(vendor[:1]) + vendor[1:]
+	}
+
+	return vendor
 }
 
 // DoHTTPRequest 发送HTTP请求（辅助函数）

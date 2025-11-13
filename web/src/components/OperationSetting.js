@@ -34,6 +34,7 @@ import ModelRatioSettings from '../pages/Setting/Operation/ModelRatioSettings.js
 
 import { API, showError, showSuccess } from '../helpers';
 import SettingsChats from '../pages/Setting/Operation/SettingsChats.js';
+import SettingsScheduledAutoUpdate from '../pages/Setting/Operation/SettingsScheduledAutoUpdate.js';
 import { useTranslation } from 'react-i18next';
 import ModelRatioNotSetEditor from '../pages/Setting/Operation/ModelRationNotSetEditor.js';
 
@@ -147,6 +148,10 @@ const OperationSetting = () => {
         {/* 通用设置 */}
         <Card style={{ marginTop: '10px' }}>
           <SettingsGeneral options={inputs} refresh={onRefresh} />
+        </Card>
+        {/* 定时自动更新设置 */}
+        <Card style={{ marginTop: '10px' }}>
+          <SettingsScheduledAutoUpdate />
         </Card>
         {/* 绘图设置 */}
         <Card style={{ marginTop: '10px' }}>
