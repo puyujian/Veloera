@@ -195,6 +195,9 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 		return model
 	}
 
+	// 移除中文括号和方括号前缀（如 [满血1m]gemini-2.5-pro, gemini-2.5-pro(稳定版)）
+	model = removeSpecialPrefixSuffix(model)
+
 	if !includeVendor && isStandardStandaloneName(model) {
 		return model
 	}
@@ -294,6 +297,28 @@ func renameModel(model string, vendorRules []*VendorRule, dateSuffixRe *regexp.R
 	}
 
 	return actualModel
+}
+
+// removeSpecialPrefixSuffix 移除特殊前缀和后缀
+// 处理格式如: [满血1m]gemini-2.5-pro, gemini-2.5-pro(稳定版), 【prefix】model
+func removeSpecialPrefixSuffix(model string) string {
+	// 移除方括号前缀 [xxx], 【xxx】
+	if idx := strings.Index(model, "]"); idx >= 0 {
+		model = strings.TrimSpace(model[idx+1:])
+	}
+	if idx := strings.Index(model, "】"); idx >= 0 {
+		model = strings.TrimSpace(model[idx+len("】"):])
+	}
+
+	// 移除圆括号后缀 (xxx), （xxx）
+	if idx := strings.Index(model, "("); idx >= 0 {
+		model = strings.TrimSpace(model[:idx])
+	}
+	if idx := strings.Index(model, "（"); idx >= 0 {
+		model = strings.TrimSpace(model[:idx])
+	}
+
+	return model
 }
 
 // AIRenameProcessor AI调用处理器
