@@ -321,7 +321,8 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		if info.IsStream {
 			err, usage = OaiStreamHandler(c, resp, info)
 		} else {
-			err, usage = OpenaiHandler(c, resp, info)
+			// 使用增强版处理函数，支持空回复按错误处理
+			err, usage = OpenaiHandlerV2(c, resp, info)
 		}
 	}
 	return
