@@ -44,6 +44,7 @@ export default function SettingGlobalModel(props) {
     'global.auto_retry_count': 3,
     'global.auto_retry_force_channel_switch': false,
     'global.auto_retry_status_codes': '5xx,4xx',
+    'global.empty_response_retry_enabled': false,
     'general_setting.ping_interval_enabled': false,
     'general_setting.ping_interval_seconds': 60,
   });
@@ -275,6 +276,22 @@ export default function SettingGlobalModel(props) {
                     }
                     placeholder='5xx,4xx'
                     extraText={'不填默认所有状态码，可使用 x，使用英文逗号分割'}
+                    disabled={!inputs['global.auto_retry_enabled']}
+                  />
+                </Col>
+              </Row>
+              <Row>
+                <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                  <Form.Switch
+                    label={t('空回复视为错误')}
+                    field={'global.empty_response_retry_enabled'}
+                    onChange={(value) =>
+                      setInputs({
+                        ...inputs,
+                        'global.empty_response_retry_enabled': value,
+                      })
+                    }
+                    extraText={t('空回复将触发自动重试与渠道切换')}
                     disabled={!inputs['global.auto_retry_enabled']}
                   />
                 </Col>
