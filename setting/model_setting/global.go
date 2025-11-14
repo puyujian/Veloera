@@ -34,6 +34,7 @@ type GlobalSettings struct {
 	AutoRetryCount               int    `json:"auto_retry_count"`
 	AutoRetryForceChannelSwitch  bool   `json:"auto_retry_force_channel_switch"`
 	AutoRetryStatusCodes         string `json:"auto_retry_status_codes"`
+	EmptyResponseRetryEnabled    bool   `json:"empty_response_retry_enabled"`
 }
 
 // 默认配置
@@ -49,6 +50,7 @@ var defaultOpenaiSettings = GlobalSettings{
 	AutoRetryCount:               3,
 	AutoRetryForceChannelSwitch:  false,
 	AutoRetryStatusCodes:         "5xx,4xx",
+	EmptyResponseRetryEnabled:    false,
 }
 
 // 全局实例
@@ -82,6 +84,11 @@ func GetAutoRetryCount() int {
 // ShouldForceChannelSwitch 是否强制切换渠道
 func ShouldForceChannelSwitch() bool {
 	return globalSettings.AutoRetryEnabled && globalSettings.AutoRetryForceChannelSwitch
+}
+
+// ShouldTreatEmptyResponseAsError 是否将空回复视为错误并触发重试
+func ShouldTreatEmptyResponseAsError() bool {
+	return globalSettings.AutoRetryEnabled && globalSettings.EmptyResponseRetryEnabled
 }
 
 // ShouldRetryForStatusCode 检查状态码是否应该重试

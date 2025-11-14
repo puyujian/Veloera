@@ -1525,5 +1525,7 @@
   "请先选择要设置标签的渠道！": "Please select the channel to set the tag first!",
   "标签不能为空！": "Tag cannot be empty!",
   "已为 {{count}} 个渠道设置标签！": "{{count}} channels have been set with tags!",
-  "已选择 {{count}} 个渠道": "{{count}} channels selected"
+  "已选择 {{count}} 个渠道": "{{count}} channels selected",
+  "空回复视为错误": "Treat empty responses as errors",
+  "空回复将触发自动重试与渠道切换": "Empty responses trigger automatic retry and channel switching"
 }

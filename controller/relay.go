@@ -128,7 +128,7 @@ func Relay(c *gin.Context) {
 		if openaiErr == nil {
 			// 检查是否实际写入了响应内容
 			responseWritten := c.GetBool("response_written")
-			if !responseWritten && model_setting.GetGlobalSettings().AutoRetryEnabled {
+			if !responseWritten && model_setting.ShouldTreatEmptyResponseAsError() {
 				// 创建一个表示空回复的错误，以便触发重试
 				openaiErr = service.OpenAIErrorWrapperLocal(
 					fmt.Errorf("empty response from upstream"),
@@ -392,8 +392,8 @@ func shouldRetryWithAutoConfig(c *gin.Context, openaiErr *dto.OpenAIErrorWithSta
 		return false
 	}
 
-	// 对于空回复的情况，也应该重试
-	if openaiErr.Error.Message == "" || strings.Contains(strings.ToLower(openaiErr.Error.Message), "empty") {
+	// 对于空回复的情况，根据配置决定是否重试
+	if model_setting.ShouldTreatEmptyResponseAsError() && (openaiErr.Error.Message == "" || strings.Contains(strings.ToLower(openaiErr.Error.Message), "empty")) {
 		return true
 	}
 
